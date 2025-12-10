@@ -12,7 +12,7 @@ def solve_da_schedule(
     reg_up_price: Optional[pd.Series] = None,
     reg_down_price: Optional[pd.Series] = None,
     initial_soc: float = 0.5,
-    rt_risk_factor: float = 1,
+    rt_risk_factor: float = 0,
     rt_dispatches_per_hour: float = 12,
     end_of_day_soc: float = 0.5
 ) -> DAScheduleResult:
@@ -108,7 +108,7 @@ def solve_da_schedule(
 
     # constraint for da bid amount 
     for t in range(int(T / rt_dispatches_per_hour)):
-        constraints.append(p_da[t] == p_da_freq_rt[t:t*rt_dispatches_per_hour].mean())
+        constraints.append(p_da[t] == p_da_freq_rt[t:(t+1)*rt_dispatches_per_hour].mean())
     
     # Power flow constraints for each time step
     for t in range(T):
@@ -117,9 +117,22 @@ def solve_da_schedule(
 
         # power decomposition
         constraints.append(p_real[t] == p_discharge[t] - p_charge[t])
+        
+        # Discharge power should be the positive part of p_real
+        constraints.append(p_discharge[t] == cp.maximum(0, p_real[t]))  # Only positive part contributes to discharge
+        
+        # Charge power should be the negative part of p_real
+        constraints.append(p_charge[t] == cp.maximum(0, -p_real[t]))  # Only negative part contributes to charge
+
 
         # getting bids
         constraints.append(p_real[t] == p_da_freq_rt[t] + p_rt[t])
+        
+        # power limits
+        constraints.append(p_rt[t] <= battery.power_max_mw)
+        constraints.append(p_rt[t] >= - battery.power_max_mw)
+        constraints.append(p_da_freq_rt[t] <= battery.power_max_mw)
+        constraints.append(p_da_freq_rt[t] >= - battery.power_max_mw)
         
         # Power limits
         constraints.append(p_discharge[t] <= battery.power_max_mw)
@@ -169,7 +182,7 @@ def solve_da_schedule(
     
     # Formulate and solve problem
     problem = cp.Problem(objective, constraints)
-    problem.solve(solver=cp.CLARABEL, verbose=False)
+    problem.solve(solver=cp.CLARABEL, verbose=True)
     
     # Check if solution was found
     if problem.status not in ["optimal", "optimal_inaccurate"]:
