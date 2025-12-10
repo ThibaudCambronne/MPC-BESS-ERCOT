@@ -66,7 +66,7 @@ def solve_da_schedule(
     r_down = cp.Variable(T, nonneg=True)  # Reg down capacity
     
     # State of charge % of total capacity
-    soc = cp.Variable(T + 1)  # all soc but initial (which is set from last DA schedule or current RA prediction)
+    soc = cp.Variable(T + 1)  # all soc variables, taking initial and producing next initial
     
     # variables for charge/discharge, makes constraints easier
     p_charge = cp.Variable(T, nonneg=True)    # Charging power [MW]
@@ -76,11 +76,11 @@ def solve_da_schedule(
     constraints = []
     
     # Initial SoC constraint
-    constraints.append(soc[0] == initial_soc * battery.capacity_mwh)
+    constraints.append(soc[0] == initial_soc)
     
     # SoC bounds
-    constraints.append(soc >= battery.soc_min * battery.capacity_mwh)
-    constraints.append(soc <= battery.soc_max * battery.capacity_mwh)
+    constraints.append(soc >= battery.soc_min)
+    constraints.append(soc <= battery.soc_max)
     
     # Power flow constraints for each time step
     for t in range(T):
@@ -97,10 +97,10 @@ def solve_da_schedule(
         # dynamucs - 1 hour time step
         # SoC decreases when discharging, increases when charging
         constraints.append(
-            soc[t + 1] == soc[t] 
+            soc[t + 1] == soc[t] + \
                 (- p_discharge[t] / battery.efficiency_discharge
-                + p_charge[t] * battery.efficiency_charge
-                ) / battery.capacity_mwh
+                + p_charge[t] * battery.efficiency_charge) \
+                / battery.capacity_mwh
         )
     
     # Objective: Maximize total expected revenue
