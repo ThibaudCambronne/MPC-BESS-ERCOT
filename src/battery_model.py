@@ -8,4 +8,4 @@ class BatteryParams:
     soc_max: float = 0.9             # Max SoC [fraction]
     efficiency_charge: float = 0.95  # Charging efficiency
     efficiency_discharge: float = 0.95  # Discharging efficiency
-    degradation_cost: float = 0.0    # $/MWh throughput (optional)
+    throughput_limit: float = 100 * 100   # Limit on discharge for warranty [MWh]

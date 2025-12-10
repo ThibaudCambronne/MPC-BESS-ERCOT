@@ -7,10 +7,14 @@ from .utils import DAScheduleResult
 
 def solve_da_schedule(
     da_price_forecast: pd.Series,
-    initial_soc: float,
+    rt_price_forecast: pd.Series,
     battery: BatteryParams,
     reg_up_price: Optional[pd.Series] = None,
-    reg_down_price: Optional[pd.Series] = None
+    reg_down_price: Optional[pd.Series] = None,
+    initial_soc: float = 0.5,
+    rt_risk_factor: float = 1,
+    rt_dispatches_per_hour: float = 12,
+    end_of_day_soc: float = 0.5
 ) -> DAScheduleResult:
     """
     Solve Stage 1 DA optimization problem.
@@ -22,6 +26,8 @@ def solve_da_schedule(
     ----------
     da_price_forecast : pd.Series
         Day-ahead energy prices for 24 hours [$/MWh]
+    rt_price_forecast : pd.Series
+        Real-time energy prices for 24 hours [$/MWh]
     initial_soc : float
         Initial state of charge [fraction, 0-1]. Determined from previous optimization (either DA or RA)
         Alternatively, could just be set to 0.5, and EOD SOC could be constrained to 0.5
@@ -31,6 +37,11 @@ def solve_da_schedule(
         Regulation up capacity prices for 24 hours [$/MW]. Currently not doing this.
     reg_down_price : Optional[pd.Series]
         Regulation down capacity prices for 24 hours [$/MW]. Currently not doing this. 
+    rt_risk_factor : float
+        Risk factor for real-time dispatch (0-1), since forecast is more uncertain 
+        than day-ahead
+    rt_dispatches_per_hour : float
+        amount of power dispatches per hour [#/hour]. Currently dispatches are done at 5 minute increments
     
     Returns
     -------
@@ -38,11 +49,12 @@ def solve_da_schedule(
         Optimization results including DA energy bids, regulation capacity,
         planned SoC trajectory, and expected revenue
     """
-    # Number of time periods (just 24 hours generally)
-    T = len(da_price_forecast)
+    # Number of time periods (just 24 hours * 5 min price per hour, generally)
+    T = len(rt_price_forecast)
     
     # Convert prices to numpy arrays
     da_prices = da_price_forecast.values
+    rt_prices = rt_price_forecast.values
     
     # by default not doing reg up down
     if reg_up_price is not None:
@@ -58,7 +70,20 @@ def solve_da_schedule(
     # Decision var
     # power
     # positive = discharge, negative = charge
-    p_da = cp.Variable(T)  
+
+    # energy bid for day ahead market 
+    p_da = cp.Variable(T) 
+
+    # energy bid for real time market
+    p_rt = cp.Variable(T)
+
+    # actual dispatch schedule 
+    p_real = cp.Variable(T)
+
+    # variables for charge/discharge and frequency, makes constraints easier
+    p_charge = cp.Variable(T, nonneg=True)    # Charging power [MW]
+    p_discharge = cp.Variable(T, nonneg=True)  # Discharging power [MW]
+    p_da_freq_rt = cp.Variable(T)  # 5 minute frequency power that will become day ahead bid [MW]
     
     # Regulation capacity [MW] - always non-negative
     # Maybe constrain to zero using bounds(0,0) if just having 0 prices doesn't work? 
@@ -66,11 +91,7 @@ def solve_da_schedule(
     r_down = cp.Variable(T, nonneg=True)  # Reg down capacity
     
     # State of charge % of total capacity
-    soc = cp.Variable(T + 1)  # all soc variables, taking initial and producing next initial
-    
-    # variables for charge/discharge, makes constraints easier
-    p_charge = cp.Variable(T, nonneg=True)    # Charging power [MW]
-    p_discharge = cp.Variable(T, nonneg=True)  # Discharging power [MW]
+    soc = cp.Variable(T + 1, nonneg = True)  # all soc variables, taking initial and producing next initial
     
     # Constraints list
     constraints = []
@@ -79,14 +100,30 @@ def solve_da_schedule(
     constraints.append(soc[0] == initial_soc)
     
     # SoC bounds
-    constraints.append(soc >= battery.soc_min)
-    constraints.append(soc <= battery.soc_max)
+    constraints.append(soc[0] >= battery.soc_min)
+    constraints.append(soc[0] <= battery.soc_max)
+    
+    # doing start and end at 50% constrained for now 
+    constraints.append(soc[T] == end_of_day_soc)
+
+    # constraint for da bid amount 
+    for t in range(int(T / rt_dispatches_per_hour)):
+        constraints.append(p_da[t] == p_da_freq_rt[t:t*rt_dispatches_per_hour].mean())
     
     # Power flow constraints for each time step
     for t in range(T):
         # DA power decomposition: p_da = p_discharge - p_charge
         # Must always be positive, so just going to get p_da = p_discharge if positive, p_da = p_charge if negative
-        constraints.append(p_da[t] == p_discharge[t] - p_charge[t])
+
+        # power decomposition
+        constraints.append(p_real[t] == p_discharge[t] - p_charge[t])
+
+        # getting bids
+        constraints.append(p_real[t] == p_da_freq_rt[t] + p_rt[t])
+        
+        # Power limits
+        constraints.append(p_discharge[t] <= battery.power_max_mw)
+        constraints.append(p_charge[t] <= battery.power_max_mw)
         
         # Power limits considering regulation reserves
         # When providing reg up, we must be able to increase discharge by r_up
@@ -94,14 +131,21 @@ def solve_da_schedule(
         constraints.append(p_discharge[t] + r_up[t] <= battery.power_max_mw)
         constraints.append(p_charge[t] + r_down[t] <= battery.power_max_mw)
         
-        # dynamucs - 1 hour time step
+        # dynamucs - 5 min timestep
         # SoC decreases when discharging, increases when charging
+        # dividing by rt_dispatchers_per_hour to get MWh
         constraints.append(
             soc[t + 1] == soc[t] + \
-                (- p_discharge[t] / battery.efficiency_discharge
-                + p_charge[t] * battery.efficiency_charge) \
+                (- p_discharge[t] / battery.efficiency_discharge / rt_dispatches_per_hour 
+                + p_charge[t] * battery.efficiency_charge / rt_dispatches_per_hour) \
                 / battery.capacity_mwh
         )
+        # soc constraints, can't go below min or above max 
+        constraints.append(soc[t+1] >= battery.soc_min)
+        constraints.append(soc[t+1] <= battery.soc_max)
+        
+    # battery throughpot constraint, respecting warranty scenario
+    constraints.append(cp.sum(p_discharge) / rt_dispatches_per_hour <= battery.throughput_limit)
     
     # Objective: Maximize total expected revenue
     # Revenue from DA energy market (discharge positive, charge negative)
@@ -111,17 +155,13 @@ def solve_da_schedule(
     reg_up_revenue = cp.sum(cp.multiply(reg_up_prices, r_up))
     reg_down_revenue = cp.sum(cp.multiply(reg_down_prices, r_down))
     
-    # Optional: battery lifecycle degradation cost
-    if battery.degradation_cost > 0:
-        throughput_cost = battery.degradation_cost * cp.sum(p_discharge + p_charge)
-    else:
-        throughput_cost = 0
+    # Revenue from RT energy market
+    rt_enegy_revenue = cp.sum(cp.multiply(rt_prices, p_rt)) * (1 - rt_risk_factor)
     
     # Total objective
     objective = cp.Maximize(
-        da_energy_revenue + 
-        reg_up_revenue + reg_down_revenue - 
-        throughput_cost
+        da_energy_revenue + rt_enegy_revenue +
+        reg_up_revenue + reg_down_revenue 
     )
     
     # Formulate and solve problem
@@ -136,18 +176,19 @@ def solve_da_schedule(
     da_energy_bids = p_da.value
     reg_up_capacity = r_up.value
     reg_down_capacity = r_down.value
-    planned_soc = soc.value
-    
-    # Convert SoC to mWh
-    planned_soc_mwh = planned_soc * battery.capacity_mwh
+    soc_schedule = soc.value
+    power_dispatch_schedule = p_real.value
+    rt_energy_bids = p_rt.value
     
     # Calculate expected revenue
     expected_revenue = problem.value
     
     return DAScheduleResult(
         da_energy_bids=da_energy_bids,
+        rt_energy_bids=rt_energy_bids,
+        power_dispatch_schedule=power_dispatch_schedule,
+        soc_schedule=soc_schedule,
         reg_up_capacity=reg_up_capacity,
         reg_down_capacity=reg_down_capacity,
-        planned_soc=planned_soc,
-        expected_revenue=expected_revenue
+        expected_revenue=expected_revenue,
     )
