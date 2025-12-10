@@ -1,5 +1,7 @@
-import pandas as pd
 from typing import Literal
+
+import pandas as pd
+
 
 def get_forecast(
     data: pd.DataFrame,
@@ -7,10 +9,14 @@ def get_forecast(
     horizon_hours: int,
     market: Literal["DA", "RT"],
     method: Literal["persistence", "perfect"],
-    price_node: str = "HB_HUBAVG"
+    price_node: str = "HB_HUBAVG",
 ) -> pd.Series:
     """
     Generate price forecast for the specified market.
-    See developer guide for details.
+    Returns a dummy time series with the correct number of elements and a time index.
     """
-    pass  # To be implemented
+    # Create a time index starting from current_time, with hourly frequency
+    time_index = pd.date_range(start=current_time, periods=horizon_hours, freq="h")
+    # Create a dummy series
+    dummy_values = [10.0] * horizon_hours
+    return pd.Series(dummy_values, index=time_index, name=f"{market}_forecast")
