@@ -9,7 +9,7 @@ def test_da_scheduler():
     # test prices
     times = pd.date_range('2024-01-01', periods=288, freq='5min')
     # peak prices during peak times (are these the same in texas as CA?)
-    da_prices = pd.Series([20.0] * 12 * 12 + [200000.0] * 6 * 12 + [20.0] * 6 * 12, index=times)
+    da_prices = pd.Series([20.0] * 12 * 12 + [100.0] * 6 * 12 + [20.0] * 6 * 12, index=times)
     rt_prices = da_prices - 10 * (np.random.rand(24 * 12) - 0.5 * np.ones(24 * 12))
     
     # Battery parameters
