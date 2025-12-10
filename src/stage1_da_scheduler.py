@@ -14,3 +14,4 @@ def solve_da_schedule(
 ) -> DAScheduleResult:
     """Solve Stage 1 DA optimization problem."""
     pass  # Implement using CVXPY
+
