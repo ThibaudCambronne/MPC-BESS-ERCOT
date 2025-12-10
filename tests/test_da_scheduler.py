@@ -24,8 +24,6 @@ def test_da_scheduler():
     
     # Verify result structure
     assert result.da_energy_bids.shape == (len(times),)
-    assert result.reg_up_capacity.shape == (len(times),)
-    assert result.reg_down_capacity.shape == (len(times),)
     assert result.soc_schedule.shape == (len(times) + 1,)  # T+1 for end state
     assert isinstance(result.expected_revenue, float)
     

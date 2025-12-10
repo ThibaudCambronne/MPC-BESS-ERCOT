@@ -128,8 +128,8 @@ def solve_da_schedule(
         # Power limits considering regulation reserves
         # When providing reg up, we must be able to increase discharge by r_up
         # When providing reg down, we must be able to increase charge by r_down
-        constraints.append(p_discharge[t] + r_up[t] <= battery.power_max_mw)
-        constraints.append(p_charge[t] + r_down[t] <= battery.power_max_mw)
+        # constraints.append(p_discharge[t] + r_up[t] <= battery.power_max_mw)
+        # constraints.append(p_charge[t] + r_down[t] <= battery.power_max_mw)
         
         # dynamucs - 5 min timestep
         # SoC decreases when discharging, increases when charging
@@ -152,16 +152,19 @@ def solve_da_schedule(
     da_energy_revenue = cp.sum(cp.multiply(da_prices, p_da))
     
     # Revenue from regulation capacity - Should always be zero for now
-    reg_up_revenue = cp.sum(cp.multiply(reg_up_prices, r_up))
-    reg_down_revenue = cp.sum(cp.multiply(reg_down_prices, r_down))
+    # reg_up_revenue = cp.sum(cp.multiply(reg_up_prices, r_up))
+    # reg_down_revenue = cp.sum(cp.multiply(reg_down_prices, r_down))
     
     # Revenue from RT energy market
     rt_enegy_revenue = cp.sum(cp.multiply(rt_prices, p_rt)) * (1 - rt_risk_factor)
     
     # Total objective
+    # objective = cp.Maximize(
+    #     da_energy_revenue + rt_enegy_revenue +
+    #     reg_up_revenue + reg_down_revenue 
+    # )
     objective = cp.Maximize(
-        da_energy_revenue + rt_enegy_revenue +
-        reg_up_revenue + reg_down_revenue 
+        da_energy_revenue + rt_enegy_revenue
     )
     
     # Formulate and solve problem
@@ -174,8 +177,10 @@ def solve_da_schedule(
     
     # Extract results
     da_energy_bids = p_da.value
-    reg_up_capacity = r_up.value
-    reg_down_capacity = r_down.value
+    # reg_up_capacity = r_up.value
+    # reg_down_capacity = r_down.value
+    reg_up_capacity = 0
+    reg_down_capacity = 0
     soc_schedule = soc.value
     power_dispatch_schedule = p_real.value
     rt_energy_bids = p_rt.value
