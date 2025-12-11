@@ -15,7 +15,7 @@ def solve_da_schedule(
     initial_soc: float = 0.5,
     rt_dispatches_per_hour: float = 4,
     end_of_day_soc: float = 0.5,
-    risk_aversion: float = 0.8
+    risk_aversion: float = 0.7
 ) -> DAScheduleResult:
     """
     Solve Stage 1 DA optimization problem.
