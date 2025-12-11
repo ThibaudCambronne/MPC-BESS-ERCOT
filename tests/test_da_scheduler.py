@@ -43,35 +43,45 @@ def test_da_scheduler():
     assert result.soc_schedule.shape == (da_prices.shape[0] + 1,)  # T+1 for end state
     assert isinstance(result.expected_revenue, float)
 
-    fig = plt.figure()
-    plt.plot(result.soc_schedule)
-    plt.savefig("tests/soc_test.png")
+    # Create figure with subplots
+    fig, axes = plt.subplots(4, 1, figsize=(10, 12))
+    
+    # Plot 1: SOC Schedule
+    axes[0].plot(result.soc_schedule)
+    axes[0].set_title("State of Charge Schedule")
+    axes[0].set_ylabel("SOC")
+    axes[0].grid(True)
+    
+    # Plot 2: Power (DA bids, RT bids, and Dispatch)
+    axes[1].plot(result.da_energy_bids, label="DA energy bids")
+    axes[1].plot(result.rt_energy_bids, label="RT energy bids")
+    axes[1].plot(result.power_dispatch_schedule, label="Dispatch schedule")
+    axes[1].set_title("Power Schedule")
+    axes[1].set_ylabel("Power")
+    axes[1].legend()
+    axes[1].grid(True)
+    
+    # Plot 3: Prices
+    axes[2].plot(da_prices, label="DA prices")
+    axes[2].plot(rt_prices, label="RT prices")
+    axes[2].set_title("Price Forecasts")
+    axes[2].set_ylabel("Price ($/MWh)")
+    axes[2].legend()
+    axes[2].grid(True)
+    
+    # Plot 4: Charge/Discharge
+    axes[3].plot(result.diagnostic_information["charge"], label="Charge")
+    axes[3].plot(result.diagnostic_information["discharge"], label="Discharge")
+    axes[3].set_title("Charge/Discharge Schedule")
+    axes[3].set_ylabel("Power")
+    axes[3].set_xlabel("Time Step")
+    axes[3].legend()
+    axes[3].grid(True)
+    
+    plt.tight_layout()
+    plt.savefig("tests/da_scheduler_results.png", dpi=150)
+    plt.show()
     plt.close()
-
-    fig = plt.figure()
-    plt.plot(result.da_energy_bids)
-    plt.plot(result.rt_energy_bids)
-    plt.plot(result.power_dispatch_schedule)
-    plt.legend(["DA energy bids", "RT energy bids", "Dispatch schedule"])
-    plt.savefig("tests/power_test.png")
-    plt.close()
-
-    plt.plot(result.da_energy_bids)
-    plt.plot(result.rt_energy_bids)
-    plt.legend(["DA energy bids", "RT energy bids", "Dispatch schedule"])
-    plt.savefig("tests/bids_test.png")
-    plt.close()
-
-    fig = plt.figure()
-    plt.plot(da_prices)
-    plt.plot(rt_prices)
-    plt.legend(["DA prices", "RT prices"])
-    plt.savefig("tests/prices_test.png")
-    plt.close()
-
-    plt.plot(result.diagnostic_information["charge"])
-    plt.plot(result.diagnostic_information["discharge"])
-    plt.savefig("tests/charge_test.png")
 
 
 if __name__ == "__main__":

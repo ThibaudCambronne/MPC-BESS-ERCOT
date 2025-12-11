@@ -152,17 +152,7 @@ def solve_da_schedule(
     constraints.append(cp.sum(cp.abs(p_real)) / rt_dispatches_per_hour <= battery.throughput_limit)
     
     # Objective: Maximize total expected revenue
-    # Revenue from DA energy market (discharge positive, charge negative)
-    da_energy_cost = cp.sum(cp.multiply(da_prices, p_da))
-    
-    # Revenue from regulation capacity - Should always be zero for now
-    # reg_up_revenue = cp.sum(cp.multiply(reg_up_prices, r_up))
-    # reg_down_revenue = cp.sum(cp.multiply(reg_down_prices, r_down))
-    
-    # Revenue from RT energy market
-    rt_energy_cost = cp.sum(
-        cp.multiply(rt_prices, p_rt) + 
-        risk_aversion * cp.multiply(rt_uncertainty, cp.abs(p_rt)))
+    # Revenue from DA energy market (discharge positive, charge negative
     
     # Total objective
     # objective = cp.Maximize(
@@ -183,10 +173,18 @@ def solve_da_schedule(
             # Severely limit RT positions during very uncertain periods
             constraints.append(cp.abs(p_rt[t]) <= 0.3 * battery.power_max_mw)
     
-    objective = cp.Minimize(
-        da_energy_cost + rt_energy_cost + rt_downside_cost
+        # Revenue from selling energy (positive when discharging at high prices)
+    da_revenue = cp.sum(cp.multiply(da_prices, p_da))
+    rt_revenue = cp.sum(cp.multiply(rt_prices, p_rt))
+
+    # Risk penalty for RT uncertainty
+    rt_risk_penalty = risk_aversion * cp.sum(
+        cp.multiply(rt_uncertainty, cp.abs(p_rt))
     )
-    
+
+    # Maximize profit = revenue - risk penalty
+    objective = cp.Maximize(da_revenue + rt_revenue - rt_risk_penalty)
+        
     # Formulate and solve problem
     problem = cp.Problem(objective, constraints)
     problem.solve(solver=cp.CLARABEL, verbose=True)
