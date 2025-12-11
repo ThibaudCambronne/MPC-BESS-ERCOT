@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -91,11 +91,11 @@ class DAScheduleResult:
     da_energy_bids: np.ndarray  # Shape (24,) [MW]
     rt_energy_bids: np.ndarray  # Shape (288,) [MW]
     power_dispatch_schedule: np.ndarray  # Shape (288,) [MW]
-    soc_schedule: np.ndarray  # Shape (289,) [0-1]
-    reg_up_capacity: np.ndarray  # Shape (288,) [MW]
-    reg_down_capacity: np.ndarray  # Shape (288,) [MW]
-    expected_revenue: float  # [$]
-
+    soc_schedule: np.ndarray        # Shape (289,) [0-1]
+    reg_up_capacity: np.ndarray     # Shape (288,) [MW]
+    reg_down_capacity: np.ndarray   # Shape (288,) [MW]
+    expected_revenue: float         # [$]
+    diagnostic_information: Optional[dict] # stuff I need for debugging
 
 @dataclass
 class RTMPCResult:

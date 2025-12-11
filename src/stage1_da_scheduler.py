@@ -9,12 +9,13 @@ def solve_da_schedule(
     da_price_forecast: pd.Series,
     rt_price_forecast: pd.Series,
     battery: BatteryParams,
+    rt_price_uncertainty: Optional[pd.Series] = None,
     reg_up_price: Optional[pd.Series] = None,
     reg_down_price: Optional[pd.Series] = None,
     initial_soc: float = 0.5,
-    rt_risk_factor: float = 0,
-    rt_dispatches_per_hour: float = 12,
-    end_of_day_soc: float = 0.5
+    rt_dispatches_per_hour: float = 4,
+    end_of_day_soc: float = 0.5,
+    risk_aversion: float = 2
 ) -> DAScheduleResult:
     """
     Solve Stage 1 DA optimization problem.
@@ -55,6 +56,11 @@ def solve_da_schedule(
     # Convert prices to numpy arrays
     da_prices = da_price_forecast.values
     rt_prices = rt_price_forecast.values
+
+    if rt_price_uncertainty is not None:
+        rt_uncertainty = rt_price_uncertainty.values
+    else:
+        rt_uncertainty = np.ones(T) * 5
     
     # by default not doing reg up down
     if reg_up_price is not None:
@@ -79,6 +85,9 @@ def solve_da_schedule(
 
     # actual dispatch schedule 
     p_real = cp.Variable(T)
+
+    p_discharge = cp.Variable(T, nonneg = True)
+    p_charge = cp.Variable(T, nonneg = True)
     
     # State of charge % of total capacity
     soc = cp.Variable(T + 1, nonneg = True)  # all soc variables, taking initial and producing next initial
@@ -107,8 +116,9 @@ def solve_da_schedule(
         # DA power decomposition: p_da = p_discharge - p_charge
         # Must always be positive, so just going to get p_da = p_discharge if positive, p_da = p_charge if negative
         
-        # # charge and discharge
-        # constraints.append(p_real[t] == p_discharge[t] - p_charge[t])
+        # charge and discharge
+                
+        constraints.append(p_real[t] == p_discharge[t] - p_charge[t]) 
 
         # getting bids
         constraints.append(p_real[t] == p_da[t] + p_rt[t])
@@ -122,13 +132,22 @@ def solve_da_schedule(
         constraints.append(p_da[t] <= battery.power_max_mw)
         constraints.append(p_da[t] >= - battery.power_max_mw)
         
+        constraints.append(p_discharge[t] <= battery.power_max_mw)
+        constraints.append(p_charge[t] <= battery.power_max_mw)
+
+        # KEY CHANGE: SoC dynamics with different efficiencies
+        # When charging (p_charge > 0): energy stored = p_charge * eta_charge
+        # When discharging (p_discharge > 0): energy removed = p_discharge / eta_discharge
         constraints.append(
-            soc[t + 1] == soc[t] + p_real[t] * battery.rte**0.5 / rt_dispatches_per_hour / battery.capacity_mwh
+            soc[t + 1] == soc[t] + 
+            (p_charge[t] * battery.efficiency_charge - p_discharge[t] / battery.efficiency_discharge) / 
+            (rt_dispatches_per_hour * battery.capacity_mwh)
         )
         # soc constraints, can't go below min or above max 
         constraints.append(soc[t+1] >= battery.soc_min)
         constraints.append(soc[t+1] <= battery.soc_max)
-        
+    
+
     # battery throughpot constraint, respecting warranty scenario
     constraints.append(cp.sum(cp.abs(p_real)) / rt_dispatches_per_hour <= battery.throughput_limit)
     
@@ -141,15 +160,31 @@ def solve_da_schedule(
     # reg_down_revenue = cp.sum(cp.multiply(reg_down_prices, r_down))
     
     # Revenue from RT energy market
-    rt_energy_cost = cp.sum(cp.multiply(rt_prices, p_rt)) * (1 - rt_risk_factor)
+    rt_energy_cost = cp.sum(
+        cp.multiply(rt_prices, p_rt) + 
+        risk_aversion * cp.multiply(rt_uncertainty, cp.abs(p_rt)))
     
     # Total objective
     # objective = cp.Maximize(
     #     da_energy_revenue + rt_enegy_revenue +
     #     reg_up_revenue + reg_down_revenue 
     # )
+
+    # 1. Penalize RT positions proportional to uncertainty
+    rt_downside_cost = risk_aversion * cp.sum(
+        cp.multiply(rt_uncertainty, cp.abs(p_rt))
+    )
+    
+    # 2. Hard cap on RT exposure during high uncertainty
+    high_uncertainty_threshold = np.percentile(rt_uncertainty, 75)
+    
+    for t in range(T):
+        if rt_uncertainty[t] > high_uncertainty_threshold:
+            # Severely limit RT positions during very uncertain periods
+            constraints.append(cp.abs(p_rt[t]) <= 0.3 * battery.power_max_mw)
+    
     objective = cp.Minimize(
-        da_energy_cost + rt_energy_cost 
+        da_energy_cost + rt_energy_cost + rt_downside_cost
     )
     
     # Formulate and solve problem
@@ -169,7 +204,8 @@ def solve_da_schedule(
     soc_schedule = soc.value
     power_dispatch_schedule = p_real.value
     rt_energy_bids = p_rt.value
-    
+    discharge = p_discharge.value
+    charge = p_charge.value
     # Calculate expected revenue
     expected_revenue = problem.value
     
@@ -181,4 +217,7 @@ def solve_da_schedule(
         reg_up_capacity=reg_up_capacity,
         reg_down_capacity=reg_down_capacity,
         expected_revenue=expected_revenue,
+        diagnostic_information={
+            "discharge": discharge,
+            "charge": charge,}
     )

@@ -47,6 +47,7 @@ def test_da_scheduler():
     plt.plot(result.soc_schedule)
     plt.savefig("tests/soc_test.png")
     plt.close()
+
     fig = plt.figure()
     plt.plot(result.da_energy_bids)
     plt.plot(result.rt_energy_bids)
@@ -55,12 +56,22 @@ def test_da_scheduler():
     plt.savefig("tests/power_test.png")
     plt.close()
 
+    plt.plot(result.da_energy_bids)
+    plt.plot(result.rt_energy_bids)
+    plt.legend(["DA energy bids", "RT energy bids", "Dispatch schedule"])
+    plt.savefig("tests/bids_test.png")
+    plt.close()
+
     fig = plt.figure()
     plt.plot(da_prices)
     plt.plot(rt_prices)
     plt.legend(["DA prices", "RT prices"])
     plt.savefig("tests/prices_test.png")
     plt.close()
+
+    plt.plot(result.diagnostic_information["charge"])
+    plt.plot(result.diagnostic_information["discharge"])
+    plt.savefig("tests/charge_test.png")
 
 
 if __name__ == "__main__":
