@@ -4,6 +4,7 @@ import cvxpy as cp
 from typing import Optional
 from .battery_model import BatteryParams
 from .utils import DAScheduleResult
+
 def solve_da_schedule(
     da_price_forecast: pd.Series,
     rt_price_forecast: pd.Series,
@@ -22,8 +23,27 @@ def solve_da_schedule(
     """
     Solve Stage 1 DA optimization problem with CVaR risk measure.
     
-    Additional Parameters
-    ---------------------
+    Parameters
+    ----------
+    da_price_forecast : pd.Series
+        Day-ahead energy prices for 24 hours [$/MWh]
+    rt_price_forecast : pd.Series
+        Real-time energy prices for 24 hours [$/MWh]
+    battery : BatteryParams
+        Battery parameters (capacity, power limits, efficiency, etc.)
+    rt_price_uncertainty : Optional[pd.Series]
+        Real-time price uncertainty/volatility for each hour
+    reg_up_price : Optional[pd.Series]
+        Regulation up capacity prices for 24 hours [$/MW]. Currently not doing this.
+    reg_down_price : Optional[pd.Series]
+        Regulation down capacity prices for 24 hours [$/MW]. Currently not doing this.
+    initial_soc : float
+        Initial state of charge [fraction, 0-1]. Determined from previous optimization (either DA or RA)
+        Alternatively, could just be set to 0.5, and EOD SOC could be constrained to 0.5
+    rt_dispatches_per_hour : float
+        amount of power dispatches per hour [#/hour]. Currently dispatches are done at 5 minute increments
+    end_of_day_soc : float
+        Target state of charge at end of day [fraction, 0-1]
     cvar_alpha : float
         Confidence level for CVaR (e.g., 0.95 means protect against worst 5% of scenarios)
     cvar_weight : float
@@ -33,9 +53,14 @@ def solve_da_schedule(
         Number of RT price scenarios to generate for CVaR calculation
     scenario_seed : Optional[int]
         Random seed for scenario generation (for reproducibility)
-    """
     
-    # Number of time periods
+    Returns
+    -------
+    DAScheduleResult
+        Optimization results including DA energy bids, regulation capacity,
+        planned SoC trajectory, and expected revenue
+    """
+    # Number of time periods (just 24 hours * 5 min price per hour, generally)
     T = len(rt_price_forecast)
     
     # Convert prices to numpy arrays
@@ -74,8 +99,10 @@ def solve_da_schedule(
     # Energy bids
     p_da = cp.Variable(T)
     p_rt = cp.Variable(T)
+
+    # actual dispatch schedule 
     p_real = cp.Variable(T)
-    
+
     p_discharge = cp.Variable(T, nonneg=True)
     p_charge = cp.Variable(T, nonneg=True)
     
@@ -92,8 +119,11 @@ def solve_da_schedule(
     
     # Initial SoC constraint
     constraints.append(soc[0] == initial_soc)
+    
     constraints.append(soc <= battery.soc_max)
     constraints.append(soc >= battery.soc_min)
+    
+    # doing start and end at 50% constrained for now 
     constraints.append(soc[T] == end_of_day_soc)
     
     # DA bid must be constant within each hour
@@ -171,6 +201,7 @@ def solve_da_schedule(
     problem = cp.Problem(objective, constraints)
     problem.solve(solver=cp.CLARABEL, verbose=True)
     
+    # Check if solution was found
     if problem.status not in ["optimal", "optimal_inaccurate"]:
         raise ValueError(f"Optimization failed with status: {problem.status}")
     
