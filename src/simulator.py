@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import os
 from typing import Literal
 from .battery_model import BatteryParams
 from .utils import DaySimulationResult, SimulationResult
@@ -7,6 +9,72 @@ from .forecaster import get_forecast
 from .stage1_da_scheduler import solve_da_schedule
 from .stage2_rt_mpc import solve_rt_mpc
 from .globals import DELTA_T, PRICE_NODE
+
+def plot_day_simulation(
+    day_result: DaySimulationResult,
+    actual_da_prices: np.ndarray,
+    actual_rt_prices: np.ndarray,
+    save_path: str = None
+) -> None:
+    """
+    Plot results from a single day simulation.
+    """
+    try:
+        # Create time axis (15-min intervals)
+        times = np.arange(len(day_result.power_trajectory)) / 4.0
+        
+        fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 16), sharex=True)
+        
+        # 1. Revenue accumulation
+        step_revenues = []
+        for t in range(len(day_result.power_trajectory)):
+            step_rev = -(actual_rt_prices[t] * day_result.power_trajectory[t] * DELTA_T)
+            step_revenues.append(step_rev)
+        
+        cum_revenue = np.cumsum(step_revenues)
+        
+        ax1.set_title(f"Day Simulation Results - {day_result.date.date()}")
+        ax1.plot(times, cum_revenue, "g-", linewidth=2, label=f"Cumulative Revenue (Total: ${day_result.total_revenue:.2f})")
+        ax1.set_ylabel("Cumulative Revenue [$]")
+        ax1.legend()
+        ax1.grid(True)
+        
+        # 2. Prices
+        ax2.set_title("Market Prices")
+        ax2.plot(times, actual_da_prices, "b-", alpha=0.7, label="DA Prices")
+        ax2.plot(times, actual_rt_prices, "r-", alpha=0.7, label="RT Prices")
+        ax2.set_ylabel("Price [$/MWh]")
+        ax2.legend()
+        ax2.grid(True)
+        
+        # 3. Battery Power
+        ax3.set_title("Battery Power Dispatch")
+        ax3.plot(times, day_result.power_trajectory, "purple", linewidth=1.5)
+        ax3.axhline(y=0, color="black", linestyle="--", alpha=0.5)
+        ax3.set_ylabel("Power [MW]")
+        ax3.text(0.02, 0.98, "Positive = Charge\nNegative = Discharge", 
+                transform=ax3.transAxes, verticalalignment="top", 
+                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8))
+        ax3.grid(True)
+        
+        # 4. State of Charge
+        ax4.set_title("Battery State of Charge")
+        soc_times = np.arange(len(day_result.soc_trajectory)) / 4.0
+        ax4.plot(soc_times, day_result.soc_trajectory, "orange", linewidth=2)
+        ax4.set_ylabel("SoC [0-1]")
+        ax4.set_xlabel("Time (Hours)")
+        ax4.grid(True)
+        
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+            print(f"Day plot saved to: {os.path.abspath(save_path)}")
+        
+        plt.close()
+        
+    except Exception as e:
+        print(f"Day plotting error: {e}")
 
 def simulate_day(
     data: pd.DataFrame,
@@ -122,6 +190,61 @@ def simulate_day(
         power_trajectory=power_trajectory,
         final_soc=soc_trajectory[-1]
     )
+
+def plot_multi_day_simulation(
+    results: SimulationResult,
+    save_path: str = None
+) -> None:
+    """
+    Plot results from multi-day simulation.
+    """
+    try:
+        n_days = len(results.daily_results)
+        dates = [day.date for day in results.daily_results]
+        
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 12))
+        
+        # 1. Cumulative Revenue Over Days
+        ax1.set_title("Multi-Day Simulation Results")
+        ax1.plot(dates, results.cumulative_revenue, "g-", linewidth=2, marker="o", 
+                label=f"Total Revenue: ${results.total_revenue:.2f}")
+        ax1.set_ylabel("Cumulative Revenue [$]")
+        ax1.legend()
+        ax1.grid(True)
+        ax1.tick_params(axis="x", rotation=45)
+        
+        # 2. Daily Revenue Breakdown
+        daily_revenues = [day.total_revenue for day in results.daily_results]
+        da_revenues = [day.da_revenue for day in results.daily_results]
+        rt_revenues = [day.rt_revenue for day in results.daily_results]
+        
+        ax2.set_title("Daily Revenue Breakdown")
+        ax2.bar(dates, da_revenues, alpha=0.7, label="DA Revenue", color="blue")
+        ax2.bar(dates, rt_revenues, bottom=da_revenues, alpha=0.7, label="RT Revenue", color="red")
+        ax2.set_ylabel("Daily Revenue [$]")
+        ax2.legend()
+        ax2.grid(True, axis="y")
+        ax2.tick_params(axis="x", rotation=45)
+        
+        # 3. Final SOC Each Day
+        final_socs = [day.final_soc for day in results.daily_results]
+        ax3.set_title("End-of-Day State of Charge")
+        ax3.plot(dates, final_socs, "orange", linewidth=2, marker="s")
+        ax3.set_ylabel("Final SOC [0-1]")
+        ax3.set_xlabel("Date")
+        ax3.grid(True)
+        ax3.tick_params(axis="x", rotation=45)
+        
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+            print(f"Multi-day plot saved to: {os.path.abspath(save_path)}")
+        
+        plt.close()
+        
+    except Exception as e:
+        print(f"Multi-day plotting error: {e}")
 
 def run_simulation(
     data: pd.DataFrame,
