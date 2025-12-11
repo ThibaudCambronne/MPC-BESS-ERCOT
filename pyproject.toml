@@ -12,6 +12,7 @@ dependencies = [
     "pandas>=2.3.3",
     "pip>=25.3",
     "pytest>=9.0.2",
+    "pyomo>=6.9.5",
 ]
 
 [build-system]

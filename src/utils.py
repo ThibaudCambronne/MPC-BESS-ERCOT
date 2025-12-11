@@ -4,7 +4,12 @@ from typing import List
 import numpy as np
 import pandas as pd
 
-from src.globals import DATA_PATH_DAM_TESTING, DATA_PATH_DAM_TRAINING, DATA_PATH_RTM
+from src.globals import (
+    DATA_PATH_DAM_TESTING,
+    DATA_PATH_DAM_TRAINING,
+    DATA_PATH_RTM,
+    PRICE_NODE,
+)
 
 
 def load_ercot_data() -> pd.DataFrame:
@@ -24,31 +29,34 @@ def load_ercot_data() -> pd.DataFrame:
     """
     # ====================
     # Load DAM data
-    df_dam_train = pd.read_csv(DATA_PATH_DAM_TRAINING, usecols=["key", "HB_SOUTH_DAM"])
-    df_dam_test = pd.read_csv(DATA_PATH_DAM_TESTING, usecols=["key", "HB_SOUTH_DAM"])
+    df_dam_train = pd.read_csv(
+        DATA_PATH_DAM_TRAINING, usecols=["key", f"{PRICE_NODE}_DAM"]
+    )
+    df_dam_test = pd.read_csv(
+        DATA_PATH_DAM_TESTING, usecols=["key", f"{PRICE_NODE}_DAM"]
+    )
     df_dam = pd.concat([df_dam_train, df_dam_test], ignore_index=True)
 
     # Specify the correct datetime format for parsing
     # Example format: '01/01/2020 1' -> '%m/%d/%Y %H'
-    df_dam["date_str"] = df_dam["key"].str.slice(0, 10)  # "MM/DD/YYYY"
-    date_parsed = pd.to_datetime(df_dam["date_str"], format="%m/%d/%Y")
-    hours = df_dam["key"].str.slice(11).astype(int) - 1  # Hour as integer
+    date_str = df_dam["key"].str.slice(0, 10)  # "MM/DD/YYYY"
+    date_parsed = pd.to_datetime(date_str, format="%m/%d/%Y")
+    hours = df_dam["key"].str.slice(11).astype(int) - 1
     df_dam["key"] = date_parsed + pd.to_timedelta(hours, unit="h")
 
-    # Keep only days with exactly hours_per_day rows
-    group_sizes = df_dam.groupby("date_str").size()
-    print(group_sizes.value_counts())
-    hours_per_day_da = 24
-    full_days_dam = group_sizes[group_sizes == hours_per_day_da].index
-    df_dam = df_dam[df_dam["date_str"].isin(full_days_dam)]
     # Resample to 15-min intervals by forward filling
-    df_dam = df_dam.set_index("key").resample("15min").ffill().reset_index()
-    print(df_dam.head())
+    df_dam = (
+        df_dam.drop_duplicates()
+        .set_index("key")
+        .resample("15min")
+        .ffill()
+        .reset_index()
+    )
 
     # ====================
     # Load RTM data
-    df_rtm = pd.read_csv(DATA_PATH_RTM, usecols=["hour_timestamp", "HB_SOUTH"]).rename(
-        columns={"HB_SOUTH": "HB_SOUTH_RTM", "hour_timestamp": "key"}
+    df_rtm = pd.read_csv(DATA_PATH_RTM, usecols=["hour_timestamp", PRICE_NODE]).rename(
+        columns={PRICE_NODE: f"{PRICE_NODE}_RTM", "hour_timestamp": "key"}
     )
 
     df_rtm["key"] = pd.to_datetime(df_rtm["key"])
@@ -58,20 +66,19 @@ def load_ercot_data() -> pd.DataFrame:
     df_rtm["key"] = df_rtm["key"] + pd.to_timedelta(df_rtm["minute"], unit="m")
     df_rtm = df_rtm.drop(columns=["minute"])
 
-    df_rtm["date_str"] = df_rtm["key"].dt.strftime("%m/%d/%Y")
-    group_sizes = df_rtm.groupby("date_str").size()
-    print(group_sizes.value_counts())
-    hours_per_day_rtm = 24 * 4
-    full_days_rtm = group_sizes[group_sizes == hours_per_day_rtm].index
-    df_rtm = df_rtm[df_rtm["date_str"].isin(full_days_rtm)]
-    print(df_rtm.head())
-
     # Merge DAM and RTM on datetime
     df_all = df_dam.merge(
         df_rtm,
         on="key",
         how="inner",
     ).set_index("key")
+
+    df_all["date_str"] = df_all.index.strftime("%m/%d/%Y")
+    group_sizes = df_all.groupby("date_str").size()
+
+    hours_per_day_rtm = 24 * 4
+    full_days_rtm = group_sizes[group_sizes == hours_per_day_rtm].index
+    df_all = df_all[df_all["date_str"].isin(full_days_rtm)]
 
     return df_all
 
