@@ -1,33 +1,48 @@
-import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
+import pandas as pd
+
 from src.battery_model import BatteryParams
+from src.forecaster import get_forecast
+from src.globals import TIME_STEPS_PER_HOUR
 from src.stage1_da_scheduler import solve_da_schedule
+from src.utils import load_ercot_data
 
 
 def test_da_scheduler():
-    # test prices
-    times = pd.date_range('2024-01-01', periods=288, freq='5min')
-    # peak prices during peak times (are these the same in texas as CA?)
-    da_prices = pd.Series([20.0] * 12 * 12 + [100.0] * 6 * 12 + [20.0] * 6 * 12, index=times)
-    rt_prices = da_prices - 10 * (np.random.rand(24 * 12) - 0.5 * np.ones(24 * 12))
-    # rt_prices = pd.Series(np.zeros(24 * 12), index = times)
-    
+    data = load_ercot_data()
+    current_time = pd.Timestamp("2025-02-01 10:00:00")
+    da_prices = get_forecast(
+        data,
+        current_time=current_time,
+        horizon_hours=38,
+        market="DA",
+        method="persistence",
+        verbose=True,
+    )[-TIME_STEPS_PER_HOUR * 24 :]
+    rt_prices = get_forecast(
+        data,
+        current_time=current_time,
+        horizon_hours=38,
+        market="RT",
+        method="persistence",
+        verbose=True,
+    )[-TIME_STEPS_PER_HOUR * 24 :]
+
     # Battery parameters
     battery = BatteryParams()
-    
+
     # Solve DA schedule
     result = solve_da_schedule(
         da_price_forecast=da_prices,
         rt_price_forecast=rt_prices,
         battery=battery,
     )
-    
+
     # Verify result structure
-    assert result.da_energy_bids.shape == (len(times),)
-    assert result.soc_schedule.shape == (len(times) + 1,)  # T+1 for end state
+    assert result.da_energy_bids.shape == da_prices.shape
+    assert result.soc_schedule.shape == (da_prices.shape[0] + 1,)  # T+1 for end state
     assert isinstance(result.expected_revenue, float)
-    
+
     fig = plt.figure()
     plt.plot(result.soc_schedule)
     plt.savefig("tests/soc_test.png")
@@ -46,7 +61,6 @@ def test_da_scheduler():
     plt.legend(["DA prices", "RT prices"])
     plt.savefig("tests/prices_test.png")
     plt.close()
-
 
 
 if __name__ == "__main__":
