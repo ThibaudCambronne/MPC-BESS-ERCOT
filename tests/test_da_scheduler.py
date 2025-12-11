@@ -7,10 +7,10 @@ from src.stage1_da_scheduler import solve_da_schedule
 
 def test_da_scheduler():
     # test prices
-    times = pd.date_range('2024-01-01', periods=288, freq='5min')
+    times = pd.date_range('2024-01-01', periods=96, freq='15min')
     # peak prices during peak times (are these the same in texas as CA?)
-    da_prices = pd.Series([20.0] * 12 * 12 + [100.0] * 6 * 12 + [20.0] * 6 * 12, index=times)
-    rt_prices = da_prices - 10 * (np.random.rand(24 * 12) - 0.5 * np.ones(24 * 12))
+    da_prices = pd.Series([20.0] * 12 * 4 + [100.0] * 6 * 4 + [20.0] * 6 * 4, index=times)
+    rt_prices = da_prices - 10 * (np.random.rand(24 * 4) - 0.5 * np.ones(24 * 4))
     # rt_prices = pd.Series(np.zeros(24 * 12), index = times)
     
     # Battery parameters
@@ -46,6 +46,10 @@ def test_da_scheduler():
     plt.legend(["DA prices", "RT prices"])
     plt.savefig("tests/prices_test.png")
     plt.close()
+
+    plt.plot(result.diagnostic_information['charge'])
+    plt.plot(result.diagnostic_information['discharge'])
+    plt.savefig("tests/charge_test.png")
 
 
 

@@ -36,6 +36,7 @@ class DAScheduleResult:
     reg_up_capacity: np.ndarray     # Shape (288,) [MW]
     reg_down_capacity: np.ndarray   # Shape (288,) [MW]
     expected_revenue: float         # [$]
+    diagnostic_information: Optional[dict] # stuff I need for debugging
 
 @dataclass
 class RTMPCResult:
