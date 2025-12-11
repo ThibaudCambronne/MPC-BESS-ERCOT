@@ -78,12 +78,15 @@ def load_ercot_data() -> pd.DataFrame:
 
 @dataclass
 class DAScheduleResult:
-    """Results from Stage 1 DA optimization."""
+    """Results from Stage 1 DA optimization.
+    CHANGED!"""
 
     da_energy_bids: np.ndarray  # Shape (24,) [MW]
-    reg_up_capacity: np.ndarray  # Shape (24,) [MW]
-    reg_down_capacity: np.ndarray  # Shape (24,) [MW]
-    planned_soc: np.ndarray  # Shape (25,) [0-1]
+    rt_energy_bids: np.ndarray  # Shape (288,) [MW]
+    power_dispatch_schedule: np.ndarray  # Shape (288,) [MW]
+    soc_schedule: np.ndarray  # Shape (289,) [0-1]
+    reg_up_capacity: np.ndarray  # Shape (288,) [MW]
+    reg_down_capacity: np.ndarray  # Shape (288,) [MW]
     expected_revenue: float  # [$]
 
 
