@@ -15,7 +15,7 @@ def solve_da_schedule(
     initial_soc: float = 0.5,
     rt_dispatches_per_hour: float = 4,
     end_of_day_soc: float = 0.5,
-    risk_aversion: float = 0.7
+    risk_aversion: float = 2
 ) -> DAScheduleResult:
     """
     Solve Stage 1 DA optimization problem.
@@ -146,7 +146,8 @@ def solve_da_schedule(
         # soc constraints, can't go below min or above max 
         constraints.append(soc[t+1] >= battery.soc_min)
         constraints.append(soc[t+1] <= battery.soc_max)
-        
+    
+
     # battery throughpot constraint, respecting warranty scenario
     constraints.append(cp.sum(cp.abs(p_real)) / rt_dispatches_per_hour <= battery.throughput_limit)
     
@@ -168,8 +169,22 @@ def solve_da_schedule(
     #     da_energy_revenue + rt_enegy_revenue +
     #     reg_up_revenue + reg_down_revenue 
     # )
+
+    # 1. Penalize RT positions proportional to uncertainty
+    rt_downside_cost = risk_aversion * cp.sum(
+        cp.multiply(rt_uncertainty, cp.abs(p_rt))
+    )
+    
+    # 2. Hard cap on RT exposure during high uncertainty
+    high_uncertainty_threshold = np.percentile(rt_uncertainty, 75)
+    
+    for t in range(T):
+        if rt_uncertainty[t] > high_uncertainty_threshold:
+            # Severely limit RT positions during very uncertain periods
+            constraints.append(cp.abs(p_rt[t]) <= 0.3 * battery.power_max_mw)
+    
     objective = cp.Minimize(
-        da_energy_cost + rt_energy_cost 
+        da_energy_cost + rt_energy_cost + rt_downside_cost
     )
     
     # Formulate and solve problem

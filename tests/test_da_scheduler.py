@@ -10,7 +10,7 @@ def test_da_scheduler():
     times = pd.date_range('2024-01-01', periods=96, freq='15min')
     # peak prices during peak times (are these the same in texas as CA?)
     da_prices = pd.Series([20.0] * 12 * 4 + [100.0] * 6 * 4 + [20.0] * 6 * 4, index=times)
-    rt_prices = da_prices - 10 * (np.random.rand(24 * 4) - 0.5 * np.ones(24 * 4))
+    rt_prices = da_prices - 50 * (np.random.rand(24 * 4) - 0.5 * np.ones(24 * 4))
     # rt_prices = pd.Series(np.zeros(24 * 12), index = times)
     
     # Battery parameters
@@ -32,12 +32,19 @@ def test_da_scheduler():
     plt.plot(result.soc_schedule)
     plt.savefig("tests/soc_test.png")
     plt.close()
+
     fig = plt.figure()
     plt.plot(result.da_energy_bids)
     plt.plot(result.rt_energy_bids)
     plt.plot(result.power_dispatch_schedule)
     plt.legend(["DA energy bids", "RT energy bids", "Dispatch schedule"])
     plt.savefig("tests/power_test.png")
+    plt.close()
+
+    plt.plot(result.da_energy_bids)
+    plt.plot(result.rt_energy_bids)
+    plt.legend(["DA energy bids", "RT energy bids", "Dispatch schedule"])
+    plt.savefig("tests/bids_test.png")
     plt.close()
 
     fig = plt.figure()
