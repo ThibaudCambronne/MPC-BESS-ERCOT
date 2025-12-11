@@ -7,47 +7,47 @@ import pandas as pd
 
 from src.forecaster import get_forecast
 from src.globals import DELTA_T, TIME_STEPS_PER_HOUR
+from src.stage1_da_scheduler import solve_da_schedule
 
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.battery_model import BatteryParams
 from src.stage2_rt_mpc import solve_rt_mpc
-from src.utils import DAScheduleResult, load_ercot_data
+from src.utils import load_ercot_data
 
 
 def generate_synthetic_data(start_date, steps_needed):
     """Generates synthetic price and DA schedule data."""
     data = load_ercot_data()
-    current_time = pd.Timestamp("2025-02-01 10:00:00")
     da_prices = get_forecast(
         data,
-        current_time=current_time,
-        horizon_hours=24,
+        current_time=start_date,
+        horizon_hours=38,
         market="DA",
         method="persistence",
         verbose=True,
     )[-TIME_STEPS_PER_HOUR * 24 :]
     rt_prices = get_forecast(
         data,
-        current_time=current_time,
-        horizon_hours=24,
+        current_time=start_date,
+        horizon_hours=38,
         market="RT",
         method="persistence",
         verbose=True,
     )[-TIME_STEPS_PER_HOUR * 24 :]
 
-    # 3. Synthetic DA Schedule (MW) - Simple Arbitrage
-    da_bids = np.zeros(steps_needed)
-    charge_mask = da_prices < 25
-    discharge_mask = da_prices > 50
-    da_bids[charge_mask] = 5.0
-    da_bids[discharge_mask] = -5.0
+    # Battery parameters
+    battery = BatteryParams()
 
-    idx = pd.date_range(start=start_date, periods=steps_needed, freq="15min")
-    rt_prices = pd.Series(data=rt_prices, index=idx)
+    # Solve DA schedule
+    da_result = solve_da_schedule(
+        da_price_forecast=da_prices,
+        rt_price_forecast=rt_prices,
+        battery=battery,
+    )
 
-    return rt_prices, da_bids
+    return rt_prices, da_result
 
 
 def run_heuristic_strategy(rt_prices, battery, steps):
@@ -125,25 +125,21 @@ def run_simulation_comparison():
 
     # --- Setup ---
     sim_date = pd.Timestamp("2025-06-15 00:00:00")
+    sim_date_da = sim_date - pd.Timedelta(hours=14)
     horizon_hours = 4
     sim_hours = 24
-    steps_per_hour = 4
+    steps_per_hour = TIME_STEPS_PER_HOUR
     sim_steps = sim_hours * steps_per_hour
 
     # Buffer for receding horizon
     total_data_steps = sim_steps + (horizon_hours * steps_per_hour) + 10
 
-    battery = BatteryParams(
-        capacity_mwh=20.0,
-        power_max_mw=10.0,
-        soc_min=0.05,
-        soc_max=0.95,
-        efficiency_charge=0.95,
-        efficiency_discharge=0.95,
-    )
+    battery = BatteryParams()
 
     # Data
-    rt_forecast_full, da_bids_full = generate_synthetic_data(sim_date, total_data_steps)
+    rt_forecast_full, da_schedule = generate_synthetic_data(
+        sim_date_da, total_data_steps
+    )
 
     # 1. Run Heuristic Baseline
     rev_baseline_step, soc_baseline = run_heuristic_strategy(
@@ -153,13 +149,6 @@ def run_simulation_comparison():
 
     # 2. Run MPC
     print("Running MPC Strategy...")
-    da_schedule = DAScheduleResult(
-        da_energy_bids=da_bids_full,
-        reg_up_capacity=np.zeros(total_data_steps),
-        reg_down_capacity=np.zeros(total_data_steps),
-        planned_soc=np.zeros(total_data_steps + 1),
-        expected_revenue=0.0,
-    )
 
     current_soc = 0.5
     soc_mpc = [current_soc]
