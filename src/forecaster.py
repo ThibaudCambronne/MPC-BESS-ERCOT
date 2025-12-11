@@ -1,5 +1,6 @@
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 
 
@@ -17,6 +18,6 @@ def get_forecast(
     """
     # Create a time index starting from current_time, with hourly frequency
     time_index = pd.date_range(start=current_time, periods=horizon_hours, freq="h")
-    # Create a dummy series
-    dummy_values = [10.0] * horizon_hours
+    # Create a dummy series (sin wave)
+    dummy_values = 50 + 10 * np.sin(np.linspace(0, 2 * np.pi, horizon_hours))
     return pd.Series(dummy_values, index=time_index, name=f"{market}_forecast")

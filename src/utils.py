@@ -1,9 +1,13 @@
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
+
 import numpy as np
 import pandas as pd
 
-def load_ercot_data(filepath: str) -> pd.DataFrame:
+from src.globals import DATA_PATH_DAM_TESTING, DATA_PATH_DAM_TRAINING, DATA_PATH_RTM
+
+
+def load_ercot_data() -> pd.DataFrame:
     """
     Load ERCOT price and ancillary services data from a CSV file.
     Parses the 'key' column as datetime and sets it as the index.
@@ -18,43 +22,97 @@ def load_ercot_data(filepath: str) -> pd.DataFrame:
     pd.DataFrame
         DataFrame with datetime index and all columns from the CSV.
     """
-    df = pd.read_csv(filepath)
-    if 'key' not in df.columns:
-        raise ValueError("Expected 'key' column in data.")
-    df['key'] = pd.to_datetime(df['key'])
-    df = df.set_index('key')
-    return df
+    # ====================
+    # Load DAM data
+    df_dam_train = pd.read_csv(DATA_PATH_DAM_TRAINING, usecols=["key", "HB_SOUTH_DAM"])
+    df_dam_test = pd.read_csv(DATA_PATH_DAM_TESTING, usecols=["key", "HB_SOUTH_DAM"])
+    df_dam = pd.concat([df_dam_train, df_dam_test], ignore_index=True)
+
+    # Specify the correct datetime format for parsing
+    # Example format: '01/01/2020 1' -> '%m/%d/%Y %H'
+    df_dam["date_str"] = df_dam["key"].str.slice(0, 10)  # "MM/DD/YYYY"
+    date_parsed = pd.to_datetime(df_dam["date_str"], format="%m/%d/%Y")
+    hours = df_dam["key"].str.slice(11).astype(int) - 1  # Hour as integer
+    df_dam["key"] = date_parsed + pd.to_timedelta(hours, unit="h")
+
+    # Keep only days with exactly hours_per_day rows
+    group_sizes = df_dam.groupby("date_str").size()
+    print(group_sizes.value_counts())
+    hours_per_day_da = 24
+    full_days_dam = group_sizes[group_sizes == hours_per_day_da].index
+    df_dam = df_dam[df_dam["date_str"].isin(full_days_dam)]
+    # Resample to 15-min intervals by forward filling
+    df_dam = df_dam.set_index("key").resample("15min").ffill().reset_index()
+    print(df_dam.head())
+
+    # ====================
+    # Load RTM data
+    df_rtm = pd.read_csv(DATA_PATH_RTM, usecols=["hour_timestamp", "HB_SOUTH"]).rename(
+        columns={"HB_SOUTH": "HB_SOUTH_RTM", "hour_timestamp": "key"}
+    )
+
+    df_rtm["key"] = pd.to_datetime(df_rtm["key"])
+    # The key are missing the minutes (the data has for instance 4 values for 00:00 instead of 00:00, 00:15, 00:30, 00:45)
+    # We fix that here by adding the minutes based on the occurrence within each hour
+    df_rtm["minute"] = df_rtm.groupby(df_rtm["key"]).cumcount() * 15
+    df_rtm["key"] = df_rtm["key"] + pd.to_timedelta(df_rtm["minute"], unit="m")
+    df_rtm = df_rtm.drop(columns=["minute"])
+
+    df_rtm["date_str"] = df_rtm["key"].dt.strftime("%m/%d/%Y")
+    group_sizes = df_rtm.groupby("date_str").size()
+    print(group_sizes.value_counts())
+    hours_per_day_rtm = 24 * 4
+    full_days_rtm = group_sizes[group_sizes == hours_per_day_rtm].index
+    df_rtm = df_rtm[df_rtm["date_str"].isin(full_days_rtm)]
+    print(df_rtm.head())
+
+    # Merge DAM and RTM on datetime
+    df_all = df_dam.merge(
+        df_rtm,
+        on="key",
+        how="inner",
+    ).set_index("key")
+
+    return df_all
+
 
 @dataclass
 class DAScheduleResult:
     """Results from Stage 1 DA optimization."""
-    da_energy_bids: np.ndarray      # Shape (24,) [MW]
-    reg_up_capacity: np.ndarray     # Shape (24,) [MW]
-    reg_down_capacity: np.ndarray   # Shape (24,) [MW]
-    planned_soc: np.ndarray         # Shape (25,) [0-1]
-    expected_revenue: float         # [$]
+
+    da_energy_bids: np.ndarray  # Shape (24,) [MW]
+    reg_up_capacity: np.ndarray  # Shape (24,) [MW]
+    reg_down_capacity: np.ndarray  # Shape (24,) [MW]
+    planned_soc: np.ndarray  # Shape (25,) [0-1]
+    expected_revenue: float  # [$]
+
 
 @dataclass
 class RTMPCResult:
     """Results from Stage 2 RT MPC."""
-    power_setpoint: float           # [MW] (+discharge, -charge)
-    predicted_soc: np.ndarray       # Over horizon
-    solve_status: str               # 'optimal', 'infeasible'
+
+    power_setpoint: float  # [MW] (+discharge, -charge)
+    predicted_soc: np.ndarray  # Over horizon
+    solve_status: str  # 'optimal', 'infeasible'
+
 
 @dataclass
 class DaySimulationResult:
     """Results from single-day simulation."""
+
     date: pd.Timestamp
-    total_revenue: float            # [$]
-    da_revenue: float               # [$]
-    rt_revenue: float               # [$]
-    soc_trajectory: np.ndarray      # Shape (97,) for 15-min steps
-    power_trajectory: np.ndarray    # Shape (96,) [MW]
-    final_soc: float                # [0-1]
+    total_revenue: float  # [$]
+    da_revenue: float  # [$]
+    rt_revenue: float  # [$]
+    soc_trajectory: np.ndarray  # Shape (97,) for 15-min steps
+    power_trajectory: np.ndarray  # Shape (96,) [MW]
+    final_soc: float  # [0-1]
+
 
 @dataclass
 class SimulationResult:
     """Results from multi-day simulation."""
+
     daily_results: List[DaySimulationResult]
     cumulative_revenue: np.ndarray  # Shape (n_days,)
-    total_revenue: float            # [$]
+    total_revenue: float  # [$]
