@@ -45,33 +45,35 @@ def test_da_scheduler():
 
     # Create figure with subplots
     fig, axes = plt.subplots(4, 1, figsize=(10, 12))
-    
+    print(len(da_prices.index), "LENGTH INDEX")
+    print(len(result.soc_schedule), "LENGTH SOC")
+
     # Plot 1: SOC Schedule
-    axes[0].plot(result.soc_schedule)
+    axes[0].plot(da_prices.index, result.soc_schedule[:-1])
     axes[0].set_title("State of Charge Schedule")
     axes[0].set_ylabel("SOC")
     axes[0].grid(True)
-    
+    print(da_prices.index)
     # Plot 2: Power (DA bids, RT bids, and Dispatch)
-    axes[1].plot(result.da_energy_bids, label="DA energy bids")
-    axes[1].plot(result.rt_energy_bids, label="RT energy bids")
-    axes[1].plot(result.power_dispatch_schedule, label="Dispatch schedule")
+    axes[1].plot(da_prices.index, result.da_energy_bids, label="DA energy bids")
+    axes[1].plot(da_prices.index, result.rt_energy_bids, label="RT energy bids")
+    axes[1].plot(da_prices.index, result.power_dispatch_schedule, label="Dispatch schedule")
     axes[1].set_title("Power Schedule")
     axes[1].set_ylabel("Power")
     axes[1].legend()
     axes[1].grid(True)
     
     # Plot 3: Prices
-    axes[2].plot(da_prices, label="DA prices")
-    axes[2].plot(rt_prices, label="RT prices")
+    axes[2].plot(da_prices.index, da_prices, label="DA prices")
+    axes[2].plot(da_prices.index, rt_prices, label="RT prices")
     axes[2].set_title("Price Forecasts")
     axes[2].set_ylabel("Price ($/MWh)")
     axes[2].legend()
     axes[2].grid(True)
     
     # Plot 4: Charge/Discharge
-    axes[3].plot(result.diagnostic_information["charge"], label="Charge")
-    axes[3].plot(result.diagnostic_information["discharge"], label="Discharge")
+    axes[3].plot(result.diagnostic_information["charge"][:-1], label="Charge")
+    axes[3].plot(result.diagnostic_information["discharge"][:-1], label="Discharge")
     axes[3].set_title("Charge/Discharge Schedule")
     axes[3].set_ylabel("Power")
     axes[3].set_xlabel("Time Step")
