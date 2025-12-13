@@ -14,17 +14,21 @@ def main():
     battery = BatteryParams()
 
     # Run a short simulation (3 days as a test)
-    start_date = pd.Timestamp("2020-01-02")
-    end_date = pd.Timestamp("2020-01-04")
+    # Note: Start from 2020-01-03 to ensure persistence forecast has previous day's data
+    # start_date = pd.Timestamp("2020-01-03")
+    start_date = pd.Timestamp("2025-02-02")
+    n_days = 3
 
-    print(f"\nRunning simulation from {start_date.date()} to {end_date.date()}...")
+    print(f"\nRunning {n_days}-day simulation starting {start_date.date()}...")
     results = run_simulation(
         data=data,
         start_date=start_date,
-        end_date=end_date,
+        n_days=n_days,
         battery=battery,
-        forecast_method="perfect",
-        horizon_type="receding"
+        forecast_method="persistence",
+        horizon_type="receding",
+        initial_soc=0.5,
+        end_of_day_soc=0.5
     )
 
     print("\n" + "="*60)
@@ -46,6 +50,7 @@ def main():
     print("\nGenerating plots...")
     
     # Multi-day overview plot
+    end_date = start_date + pd.Timedelta(days=n_days-1)
     multi_day_plot_path = os.path.join(plots_dir, f"multi_day_simulation_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.png")
     plot_multi_day_simulation(results, save_path=multi_day_plot_path)
     

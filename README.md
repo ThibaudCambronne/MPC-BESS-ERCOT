@@ -46,7 +46,7 @@ uv run main.py
 
 ### Custom Simulation
 
-Modify [main.py](main.py) to customize your simulation:
+The API has been simplified to use `n_days` instead of `end_date`:
 
 ```python
 import pandas as pd
@@ -57,25 +57,27 @@ from src.simulator import run_simulation
 # Load data
 data = load_ercot_data()
 
-# Configure battery parameters
+# Configure battery parameters (optional - uses defaults if not specified)
 battery = BatteryParams(
-    capacity_mwh=100.0,      # Energy capacity [MWh]
-    power_max_mw=25.0,       # Max charge/discharge [MW]
-    soc_min=0.1,             # Min state of charge [0-1]
-    soc_max=0.9,             # Max state of charge [0-1]
-    efficiency_charge=0.95,  # Charging efficiency
+    capacity_mwh=100.0,         # Energy capacity [MWh]
+    power_max_mw=25.0,          # Max charge/discharge [MW]
+    soc_min=0.1,                # Min state of charge [0-1]
+    soc_max=0.9,                # Max state of charge [0-1]
+    efficiency_charge=0.95,     # Charging efficiency
     efficiency_discharge=0.95,  # Discharging efficiency
-    throughput_limit=200.0   # Daily throughput limit [MWh]
+    throughput_limit=200.0      # Daily throughput limit [MWh]
 )
 
-# Run simulation
+# Run simulation (simplified API)
 results = run_simulation(
     data=data,
     start_date=pd.Timestamp("2020-01-02"),
-    end_date=pd.Timestamp("2020-01-31"),
-    battery=battery,
+    n_days=30,                  # Simulate 30 days
+    battery=battery,            # Optional
     forecast_method="perfect",  # or "persistence"
-    horizon_type="receding"     # or "shrinking"
+    horizon_type="receding",    # or "shrinking"
+    initial_soc=0.5,           # Start at 50% SOC
+    end_of_day_soc=0.5         # Target 50% at end of each day
 )
 
 # Access results
