@@ -14,113 +14,55 @@ from src.stage1_da_scheduler import solve_da_schedule
 from src.stage2_rt_mpc import solve_rt_mpc
 from src.utils import DAScheduleResult, load_ercot_data
 
-# =============================================================================
-# HELPER FUNCTIONS
-# =============================================================================
-
 def find_interesting_days(data, top_n=3):
-    """
-    Scans the RTM data to find days with the highest price volatility.
-    High volatility = High potential for MPC arbitrage.
-    """
     print("Scanning data for high-volatility days...")
-    
-    # Filter for RTM price column
     price_col = f"{PRICE_NODE}_RTM"
-    
-    # Resample to daily and calculate std dev
     daily_volatility = data[price_col].resample('D').std()
-    
-    # Sort descending and take top N
     top_days = daily_volatility.sort_values(ascending=False).head(top_n).index
-    
-    # Convert to string format 'YYYY-MM-DD'
     return [d.strftime('%Y-%m-%d') for d in top_days]
 
 def setup_simulation_data(data, sim_date_str, sim_hours=24, buffer_hours=4):
-    """
-    Extracts the specific slices of data needed for Stage 1 and Stage 2.
-    """
     sim_date = pd.Timestamp(sim_date_str)
-    
-    # check availability
     if sim_date not in data.index:
         print(f"Skipping {sim_date}: Data not found.")
         return None, None, None
 
-    # 1. Stage 1 Inputs (Day-Ahead)
-    # Run at 10am D-1. We need 24h forecast for the target day.
     da_run_time = sim_date - pd.Timedelta(hours=14)
     
+    # Stage 1: Persistence Forecast
     da_prices_s1 = get_forecast(
         data, current_time=da_run_time, horizon_hours=14 + 24, 
-        market="DA", method="perfect", verbose=False
+        market="DA", method="persistence", verbose=False
     )[-96:] 
 
     rt_prices_s1 = get_forecast(
         data, current_time=da_run_time, horizon_hours=14 + 24, 
-        market="RT", method="perfect", verbose=False
+        market="RT", method="persistence", verbose=False
     )[-96:]
 
-    # 2. Stage 2 Inputs (Real-Time Sim + Buffer)
+    # Stage 2: Perfect Forecast (Simulation)
     total_hours = sim_hours + buffer_hours
     rt_prices_sim = get_forecast(
         data, current_time=sim_date, horizon_hours=total_hours, 
         market="RT", method="perfect", verbose=False
     )
     
-    # Sanity Check Length
-    expected_len = int(total_hours * TIME_STEPS_PER_HOUR)
-    if len(rt_prices_sim) < expected_len:
-        print(f"Skipping {sim_date}: Not enough future data (End of dataset?).")
+    if len(rt_prices_sim) < int(total_hours * TIME_STEPS_PER_HOUR):
         return None, None, None
         
     return da_prices_s1, rt_prices_s1, rt_prices_sim
 
-def run_heuristic_strategy(rt_prices, battery, steps):
-    """Baseline strategy for comparison."""
-    price_values = rt_prices.values
-    p25, p75 = np.percentile(price_values, 25), np.percentile(price_values, 75)
-    current_soc = 0.5
-    soc_history = [current_soc]
-    revenue_history = []
-
-    for t in range(steps):
-        price = price_values[t]
-        p_cmd = 0.0
-        # Simple Logic
-        if price <= p25: p_cmd = battery.power_max_mw
-        elif price >= p75: p_cmd = -battery.power_max_mw
-
-        # Physics
-        if p_cmd > 0:
-            if current_soc * battery.capacity_mwh + p_cmd * battery.efficiency_charge * DELTA_T > battery.soc_max * battery.capacity_mwh: p_cmd = 0
-        elif p_cmd < 0:
-            if current_soc * battery.capacity_mwh + p_cmd / battery.efficiency_discharge * DELTA_T < battery.soc_min * battery.capacity_mwh: p_cmd = 0
-        
-        if p_cmd >= 0: e_next = current_soc * battery.capacity_mwh + p_cmd * battery.efficiency_charge * DELTA_T
-        else: e_next = current_soc * battery.capacity_mwh + p_cmd / battery.efficiency_discharge * DELTA_T
-        
-        current_soc = np.clip(e_next / battery.capacity_mwh, 0.0, 1.0)
-        soc_history.append(current_soc)
-        revenue_history.append(-(price * p_cmd * DELTA_T))
-
-    return revenue_history, soc_history
-
 def run_simulation_for_date(data, date_str):
     print(f"\n>>> Running Simulation for: {date_str} <<<")
-    
-    # Setup
     sim_hours = 24
     mpc_horizon = 4
     sim_steps = sim_hours * TIME_STEPS_PER_HOUR
     battery = BatteryParams()
 
-    # Get Data
     da_prices, rt_prices_s1, rt_prices_sim = setup_simulation_data(data, date_str, sim_hours, mpc_horizon)
     if da_prices is None: return
 
-    # --- Stage 1: DA Schedule ---
+    # --- Stage 1 ---
     print("  Running Stage 1 (DA Scheduler)...")
     try:
         da_result = solve_da_schedule(
@@ -133,23 +75,19 @@ def run_simulation_for_date(data, date_str):
         print(f"  Stage 1 Failed: {e}")
         return
 
-    da_revenue_total = np.sum(-(da_prices.values * da_result.da_energy_bids * DELTA_T))
-    print(f"  Stage 1 Revenue: ${da_revenue_total:.2f}")
-
-    # --- Baseline ---
-    rev_base_step, soc_base = run_heuristic_strategy(rt_prices_sim.iloc[:sim_steps], battery, sim_steps)
-    cum_rev_base = np.cumsum(rev_base_step)
-
-    # --- Stage 2: MPC ---
+    # --- Stage 2 ---
     print("  Running Stage 2 (MPC)...")
     curr_soc = 0.5
     soc_mpc = [curr_soc]
-    rev_mpc_cum = []
-    curr_total_rev = 0.0
-    power_mpc = []
+    rev_cum = []
+    total_rev = 0.0
+    
+    # Tracking Arrays for Plotting
+    p_green_list = [] # Actual Dispatch
+    p_orange_list = [] # RT Deviation
+    p_blue_list = []   # DA Commitment
 
     for t in range(sim_steps):
-        # Progress dot
         if t % 24 == 0: print(".", end="", flush=True)
         
         curr_time = pd.Timestamp(date_str) + pd.Timedelta(minutes=15 * t)
@@ -157,78 +95,89 @@ def run_simulation_for_date(data, date_str):
         res = solve_rt_mpc(
             current_time=curr_time,
             current_soc=curr_soc,
-            rt_price_forecast=rt_prices_sim, # Passed full, handled inside
+            rt_price_forecast=rt_prices_sim,
             da_commitments=da_result,
             battery=battery,
             horizon_type="receding",
             horizon_hours=mpc_horizon
         )
         
-        p_set = res.power_setpoint if res.solve_status in ["optimal", "max_iter", "optimal_with_slack"] else 0.0
+        # 1. Get Requested Green Line (Dispatch)
+        p_req = res.power_setpoint if res.solve_status in ["optimal", "max_iter", "optimal_with_slack"] else 0.0
         
-        # Physics
-        if p_set >= 0: e_next = curr_soc * battery.capacity_mwh + p_set * battery.efficiency_charge * DELTA_T
-        else: e_next = curr_soc * battery.capacity_mwh + p_set / battery.efficiency_discharge * DELTA_T
+        # 2. Strict Physics (Clamping)
+        e_curr = curr_soc * battery.capacity_mwh
+        e_max = battery.soc_max * battery.capacity_mwh
+        e_min = battery.soc_min * battery.capacity_mwh
+        
+        max_ch = (e_max - e_curr) / (battery.efficiency_charge * DELTA_T)
+        max_dis = (e_min - e_curr) * battery.efficiency_discharge / DELTA_T
+        
+        # Green Line (Actual)
+        p_green = np.clip(p_req, -battery.power_max_mw, battery.power_max_mw)
+        p_green = np.clip(p_green, max_dis, max_ch)
+        
+        # 3. Derive Components
+        p_blue = da_result.da_energy_bids[t] # DA Commitment
+        p_orange = p_green - p_blue          # RT Adjustment
+        
+        # Update State
+        if p_green >= 0: e_next = e_curr + p_green * battery.efficiency_charge * DELTA_T
+        else: e_next = e_curr + p_green / battery.efficiency_discharge * DELTA_T
         curr_soc = np.clip(e_next / battery.capacity_mwh, 0.0, 1.0)
         
-        # Revenue (Two-Settlement)
-        rev_da_t = -(da_prices.values[t] * da_result.da_energy_bids[t] * DELTA_T)
-        rev_rt_t = -(rt_prices_sim.iloc[t] * (p_set - da_result.da_energy_bids[t]) * DELTA_T)
+        # Revenue
+        rev_da = -(da_prices.values[t] * p_blue * DELTA_T)
+        rev_rt = -(rt_prices_sim.iloc[t] * p_orange * DELTA_T)
         
-        curr_total_rev += (rev_da_t + rev_rt_t)
-        rev_mpc_cum.append(curr_total_rev)
+        total_rev += (rev_da + rev_rt)
+        
+        # Store
+        rev_cum.append(total_rev)
         soc_mpc.append(curr_soc)
-        power_mpc.append(p_set)
+        p_green_list.append(p_green)
+        p_blue_list.append(p_blue)
+        p_orange_list.append(p_orange)
 
-    print(f"\n  Done. Final Revenue: ${curr_total_rev:.2f} (Baseline: ${cum_rev_base[-1]:.2f})")
+    print(f"\n  Done. Final Revenue: ${total_rev:.2f}")
 
-    # --- Plotting ---
-    plot_simulation(
-        date_str, sim_steps, rev_mpc_cum, cum_rev_base, 
-        rt_prices_sim.iloc[:sim_steps], soc_mpc, soc_base, power_mpc, da_result.da_energy_bids
+    plot_detailed_simulation(
+        date_str, sim_steps, rev_cum, rt_prices_sim.iloc[:sim_steps], 
+        soc_mpc, p_green_list, p_blue_list, p_orange_list
     )
 
-def plot_simulation(date_str, steps, rev_mpc, rev_base, prices, soc_mpc, soc_base, power, da_bids):
+def plot_detailed_simulation(date_str, steps, revenue, prices, soc, p_green, p_blue, p_orange):
     times = np.arange(steps) / 4.0
     fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 16), sharex=True)
     
-    ax1.set_title(f"Simulation: {date_str} | MPC: ${rev_mpc[-1]:.0f} vs Base: ${rev_base[-1]:.0f}")
-    ax1.plot(times, rev_mpc, "g-", linewidth=2, label="MPC")
-    ax1.plot(times, rev_base, "k--", label="Heuristic")
+    # 1. Revenue
+    ax1.set_title(f"Simulation: {date_str} | Total Revenue: ${revenue[-1]:,.2f}")
+    ax1.plot(times, revenue, "g-", linewidth=2, label="Cumulative Revenue")
     ax1.legend(); ax1.grid(True); ax1.set_ylabel("Revenue [$]")
     
-    ax2.plot(times, prices.values, "b-", alpha=0.6); ax2.set_ylabel("Price RT"); ax2.grid(True)
+    # 2. Prices
+    ax2.plot(times, prices.values, "b-", alpha=0.6, label="RT Price")
+    ax2.legend(); ax2.set_ylabel("Price [$]"); ax2.grid(True)
     
-    ax3.step(times, power, "r-", where='post', label="RT Dispatch")
-    ax3.step(times, da_bids, "k--", where='post', label="DA Plan")
-    ax3.legend(); ax3.set_ylabel("MW"); ax3.grid(True)
+    # 3. Power Components (THE KEY PLOT)
+    ax3.set_title("Power Components: Green = Blue + Orange")
+    ax3.step(times, p_blue, "b--", where='post', label="DA Plan (Blue)", alpha=0.6)
+    ax3.step(times, p_orange, "orange", where='post', label="RT Adjustment (Orange)", alpha=0.8)
+    ax3.step(times, p_green, "g-", where='post', label="Final Dispatch (Green)", linewidth=1.5)
+    ax3.legend(loc="upper right"); ax3.set_ylabel("Power [MW]"); ax3.grid(True)
     
-    ax4.plot(times, soc_mpc[:-1], "g-"); ax4.plot(times, soc_base[:-1], "k--")
+    # 4. SoC
+    ax4.plot(times, soc[:-1], "k-", label="SoC")
     ax4.set_ylabel("SoC"); ax4.grid(True)
     
-    # Create 'plots' folder if not exists
     os.makedirs("plots", exist_ok=True)
-    filename = f"plots/sim_{date_str}.png"
+    filename = f"plots/sim_{date_str}_detailed.png"
     plt.savefig(filename, dpi=100)
     plt.close()
     print(f"  Plot saved to {filename}")
 
-# =============================================================================
-# MAIN EXECUTION
-# =============================================================================
 if __name__ == "__main__":
-    # 1. Load Data ONCE
-    print("Loading Dataset (this may take a moment)...")
     full_data = load_ercot_data()
-    
-    # 2. Define Dates to Test
-    # Option A: Manual Dates
-    # test_dates = ["2025-01-15", "2025-06-15"] 
-    
-    # Option B: Automatic "High Volatility" Detection
     test_dates = find_interesting_days(full_data, top_n=3)
-    
-    # 3. Run Loop
-    print(f"\nRunning simulations for: {test_dates}")
     for date in test_dates:
         run_simulation_for_date(full_data, date)
