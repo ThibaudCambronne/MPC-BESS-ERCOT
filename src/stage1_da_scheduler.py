@@ -227,7 +227,10 @@ def solve_da_schedule(
     cvar_term = model.tau + (1.0 / (1.0 - cvar_alpha)) * sum(model.z[s] for s in model.S) / n_scenarios
     
     # RT dispatch penalty (discourages relying on RT market)
-    if rt_dispatch_penalty > 0:
+    # Not using the rt dispatch penalty
+    # TODO: Reconsider this 
+    # if rt_dispatch_penalty > 0:
+    if False:
         rt_penalty = rt_dispatch_penalty * sum(model.p_rt_abs[t] for t in model.T) / rt_dispatches_per_hour
     else:
         rt_penalty = 0
