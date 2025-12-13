@@ -14,10 +14,12 @@ def plot_day_simulation(
     day_result: DaySimulationResult,
     actual_da_prices: np.ndarray,
     actual_rt_prices: np.ndarray,
+    da_schedule: Optional[DAScheduleResult] = None,
     save_path: str = None
 ) -> None:
     """
     Plot results from a single day simulation with real timestamps.
+    Shows both DA planned dispatch and actual RT dispatch.
     """
     try:
         # Create real timestamp axis (15-min intervals)
@@ -33,7 +35,7 @@ def plot_day_simulation(
             freq='15min'
         )
 
-        fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(14, 16), sharex=True)
+        fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(14, 18), sharex=True)
 
         # 1. Revenue accumulation
         step_revenues = []
@@ -49,31 +51,70 @@ def plot_day_simulation(
         ax1.legend()
         ax1.grid(True, alpha=0.3)
 
-        # 2. Prices
-        ax2.set_title("Market Prices")
-        ax2.plot(timestamps, actual_da_prices, "b-", alpha=0.7, linewidth=1.5, label="DA Prices")
-        ax2.plot(timestamps, actual_rt_prices, "r-", alpha=0.7, linewidth=1.5, label="RT Prices")
+        # 2. Prices - Show both FORECAST (what DA scheduler saw) and ACTUAL
+        ax2.set_title("Market Prices: Forecast (used by DA) vs Actual")
+
+        # Plot actual prices (solid lines)
+        ax2.plot(timestamps, actual_da_prices, "b-", alpha=0.7, linewidth=1.5, label="DA Actual")
+        ax2.plot(timestamps, actual_rt_prices, "r-", alpha=0.7, linewidth=1.5, label="RT Actual")
+
+        # Plot forecast prices if available (dashed lines)
+        if (da_schedule is not None and
+            da_schedule.da_price_forecast is not None and
+            da_schedule.rt_price_forecast is not None):
+            da_forecast = da_schedule.da_price_forecast[:len(timestamps)]
+            rt_forecast = da_schedule.rt_price_forecast[:len(timestamps)]
+            ax2.plot(timestamps, da_forecast, "b--", alpha=0.5, linewidth=1.5,
+                    label="DA Forecast (used by optimizer)")
+            ax2.plot(timestamps, rt_forecast, "r--", alpha=0.5, linewidth=1.5,
+                    label="RT Forecast (used by optimizer)")
+
         ax2.set_ylabel("Price [$/MWh]")
-        ax2.legend()
+        ax2.legend(loc='upper right', fontsize=8)
         ax2.grid(True, alpha=0.3)
 
-        # 3. Battery Power
-        ax3.set_title("Battery Power Dispatch")
-        ax3.plot(timestamps, day_result.power_trajectory, "purple", linewidth=1.5)
-        ax3.axhline(y=0, color="black", linestyle="--", alpha=0.5)
+        # 3. Battery Power Dispatch - COMPARE DA PLAN VS RT ACTUAL
+        ax3.set_title("Battery Power Dispatch: DA Plan vs RT Actual")
+
+        # Plot DA planned dispatch
+        if da_schedule is not None:
+            da_power = da_schedule.power_dispatch_schedule[:len(timestamps)]
+            ax3.plot(timestamps, da_power, "gray", linewidth=2, alpha=0.6,
+                    linestyle='--', label='DA Plan (computed day before)')
+
+        # Plot actual RT dispatch
+        ax3.plot(timestamps, day_result.power_trajectory, "purple", linewidth=2,
+                label='RT Actual (MPC dispatched)')
+        ax3.axhline(y=0, color="black", linestyle="-", alpha=0.3, linewidth=0.5)
+
+        # Shade discharge/charge regions for actual
         ax3.fill_between(timestamps, 0, day_result.power_trajectory,
                          where=(day_result.power_trajectory < 0),
-                         color='red', alpha=0.3, label='Discharge')
+                         color='red', alpha=0.2, label='Actual Discharge')
         ax3.fill_between(timestamps, 0, day_result.power_trajectory,
                          where=(day_result.power_trajectory > 0),
-                         color='blue', alpha=0.3, label='Charge')
+                         color='blue', alpha=0.2, label='Actual Charge')
+
         ax3.set_ylabel("Power [MW]")
-        ax3.legend()
+        ax3.legend(loc='upper right')
         ax3.grid(True, alpha=0.3)
 
-        # 4. State of Charge
-        ax4.set_title("Battery State of Charge")
-        ax4.plot(soc_timestamps, day_result.soc_trajectory, "orange", linewidth=2)
+        # 4. State of Charge - COMPARE DA PLAN VS RT ACTUAL
+        ax4.set_title("Battery State of Charge: DA Plan vs RT Actual")
+
+        # Plot DA planned SOC
+        if da_schedule is not None:
+            da_soc_timestamps = pd.date_range(
+                start=day_start,
+                periods=len(da_schedule.soc_schedule),
+                freq='15min'
+            )
+            ax4.plot(da_soc_timestamps, da_schedule.soc_schedule, "gray",
+                    linewidth=2, alpha=0.6, linestyle='--', label='DA Plan')
+
+        # Plot actual RT SOC
+        ax4.plot(soc_timestamps, day_result.soc_trajectory, "orange", linewidth=2,
+                label='RT Actual')
         ax4.axhline(y=0.5, color='gray', linestyle=':', alpha=0.5, label='Target (50%)')
         ax4.set_ylabel("SoC [0-1]")
         ax4.set_xlabel("Time")
@@ -149,7 +190,7 @@ def simulate_day(
     if len(day_data) != 96:
         raise ValueError(f"Expected 96 intervals for date {date}, got {len(day_data)}")
 
-    # Get actual prices for the day
+    # Get actual prices for the day for revenue calculation
     actual_rt_prices = day_data[f"{PRICE_NODE}_RTM"].values
 
     # === Stage 2: Real-Time MPC (run every 15 minutes) ===
@@ -398,6 +439,10 @@ def run_simulation(
             end_of_day_soc=end_of_day_soc
         )
 
+        # Store forecast prices used (for debugging/plotting)
+        da_schedule.da_price_forecast = np.array(da_prices.values)
+        da_schedule.rt_price_forecast = np.array(rt_prices.values)
+
         da_schedules[sim_date] = da_schedule
 
     # Now simulate each day using the pre-computed DA schedules
@@ -442,5 +487,6 @@ def run_simulation(
     return SimulationResult(
         daily_results=daily_results,
         cumulative_revenue=cumulative_revenue,
-        total_revenue=total_revenue
+        total_revenue=total_revenue,
+        da_schedules=da_schedules
     )

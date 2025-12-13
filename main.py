@@ -60,16 +60,20 @@ def main():
         day_start = day_result.date.normalize()
         day_end = day_start + pd.Timedelta(days=1)
         day_data = data.loc[day_start:day_end - pd.Timedelta(minutes=15)]
-        
+
         if len(day_data) == 96:
             actual_da_prices = day_data[f"{PRICE_NODE}_DAM"].values
             actual_rt_prices = day_data[f"{PRICE_NODE}_RTM"].values
-            
+
+            # Get DA schedule for this day
+            da_schedule = results.da_schedules.get(day_result.date)
+
             day_plot_path = os.path.join(plots_dir, f"day_simulation_{day_result.date.strftime('%Y%m%d')}.png")
             plot_day_simulation(
-                day_result, 
-                actual_da_prices, 
-                actual_rt_prices, 
+                day_result,
+                actual_da_prices,
+                actual_rt_prices,
+                da_schedule=da_schedule,
                 save_path=day_plot_path
             )
     
