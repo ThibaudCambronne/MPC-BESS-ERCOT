@@ -1,4 +1,5 @@
 import pandas as pd
+import logging
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -37,16 +38,26 @@ def plot_day_simulation(
 
         fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(14, 18), sharex=True)
 
-        # 1. Revenue accumulation
-        step_revenues = []
+        # 1. Revenue accumulation - separate DA and RT components
+        da_power_bids = da_schedule.da_energy_bids[:len(day_result.power_trajectory)] if da_schedule else np.zeros(len(day_result.power_trajectory))
+        rt_imbalance = day_result.power_trajectory - da_power_bids
+        
+        da_step_revenues = []
+        rt_step_revenues = []
         for t in range(len(day_result.power_trajectory)):
-            step_rev = -(actual_rt_prices[t] * day_result.power_trajectory[t] * DELTA_T)
-            step_revenues.append(step_rev)
-
-        cum_revenue = np.cumsum(step_revenues)
+            da_step_rev = -(actual_da_prices[t] * da_power_bids[t] * DELTA_T)
+            rt_step_rev = -(actual_rt_prices[t] * rt_imbalance[t] * DELTA_T)
+            da_step_revenues.append(da_step_rev)
+            rt_step_revenues.append(rt_step_rev)
+        
+        cum_da_revenue = np.cumsum(da_step_revenues)
+        cum_rt_revenue = np.cumsum(rt_step_revenues)
+        cum_total_revenue = cum_da_revenue + cum_rt_revenue
 
         ax1.set_title(f"Day Simulation Results - {day_result.date.date()}", fontsize=14, fontweight='bold')
-        ax1.plot(timestamps, cum_revenue, "g-", linewidth=2, label=f"Cumulative Revenue (Total: ${day_result.total_revenue:.2f})")
+        ax1.plot(timestamps, cum_total_revenue, "g-", linewidth=2, label=f"Total Revenue: ${day_result.total_revenue:.2f}")
+        ax1.plot(timestamps, cum_da_revenue, "b--", linewidth=1.5, alpha=0.7, label=f"DA Revenue: ${day_result.da_revenue:.2f}")
+        ax1.plot(timestamps, cum_rt_revenue, "r--", linewidth=1.5, alpha=0.7, label=f"RT Revenue: ${day_result.rt_revenue:.2f}")
         ax1.set_ylabel("Cumulative Revenue [$]")
         ax1.legend()
         ax1.grid(True, alpha=0.3)
@@ -65,9 +76,9 @@ def plot_day_simulation(
             da_forecast = da_schedule.da_price_forecast[:len(timestamps)]
             rt_forecast = da_schedule.rt_price_forecast[:len(timestamps)]
             ax2.plot(timestamps, da_forecast, "b--", alpha=0.5, linewidth=1.5,
-                    label="DA Forecast (used by optimizer)")
+                    label="DA Forecast (used by optimizers)")
             ax2.plot(timestamps, rt_forecast, "r--", alpha=0.5, linewidth=1.5,
-                    label="RT Forecast (used by optimizer)")
+                    label="RT Forecast (used by optimizers)")
 
         ax2.set_ylabel("Price [$/MWh]")
         ax2.legend(loc='upper right', fontsize=8)
@@ -239,30 +250,35 @@ def simulate_day(
         soc_next = current_soc + energy_change_mwh / battery.capacity_mwh
 
         # Clamp SOC to valid range
-        soc_next = np.clip(soc_next, battery.soc_min, battery.soc_max)
+        if not (battery.soc_min <= soc_next <= battery.soc_max):
+            raise logging.warning(f"SOC out of bounds at {current_time}: {soc_next}")
+
         soc_trajectory[t + 1] = soc_next
 
     # === Calculate Revenues ===
-    # Revenue is based on ACTUAL dispatched power (from RT MPC), not DA bids
-    # Convention: positive power = charging (we pay), negative power = discharging (we receive)
-    #
-    # Revenue = sum(price * discharge_power) - sum(price * charge_power)
-    #         = sum(price * power)  where power is net (negative for discharge, positive for charge)
-    #         = -sum(price * power) converted to revenue convention
-    #
-    # Since power_trajectory follows: negative = discharge (sell), positive = charge (buy)
-    # Revenue = sum(price * (-power)) for discharge portions
-    #
-    # Simplified: revenue = -sum(price * power) * DELTA_T
-
-    # Convert to numpy array to ensure type compatibility
+    # Revenue calculation based on actual market structure:
+    # 1. DA Market: Revenue from power bids placed in DA market at actual DA prices
+    # 2. RT Market: Revenue from difference between actual dispatch and DA bids at RT prices
+    
+    # Get actual DA prices for the day
+    actual_da_prices = day_data[f"{PRICE_NODE}_DAM"].values
     actual_rt_prices_arr = np.array(actual_rt_prices)
-    total_revenue = float(-np.sum(actual_rt_prices_arr * power_trajectory * DELTA_T))
-
-    # For reporting, we can separate DA vs RT components based on planned vs actual
-    # For simplicity, attribute all revenue to RT market since that's where actual settlement happens
-    da_revenue = 0.0  # Actual DA market not implemented in this simplified version
-    rt_revenue = total_revenue
+    
+    # Get DA power bids (what we committed to in DA market)
+    da_power_bids = da_schedule.da_energy_bids[:len(power_trajectory)]
+    
+    # Calculate DA market revenue: DA bids × actual DA prices
+    # Convention: negative power = discharge (we receive money), positive = charge (we pay)
+    da_revenue = float(-np.sum(da_power_bids * actual_da_prices * DELTA_T))
+    
+    # Calculate RT market imbalance: actual MPC dispatch - DA bids
+    rt_energy_volume= power_trajectory - da_power_bids
+    
+    # Calculate RT market revenue: imbalance × actual RT prices
+    rt_revenue = float(-np.sum(rt_energy_volume * actual_rt_prices_arr * DELTA_T))
+    
+    # Total revenue = DA revenue + RT revenue
+    total_revenue = da_revenue + rt_revenue
 
     return DaySimulationResult(
         date=day_start,
