@@ -2,8 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from src.battery_model import BatteryParams
-from src.forecaster import get_forecast
-from src.globals import TIME_STEPS_PER_HOUR
+from src.forecaster import get_forecasts_for_da
 from src.stage1_da_scheduler import solve_da_schedule
 from src.utils import load_ercot_data
 
@@ -11,22 +10,13 @@ from src.utils import load_ercot_data
 def test_da_scheduler():
     data = load_ercot_data()
     current_time = pd.Timestamp("2025-02-01 10:00:00")
-    da_prices = get_forecast(
+    da_prices, rt_prices = get_forecasts_for_da(
         data,
         current_time=current_time,
-        horizon_hours=38,
-        market="DA",
+        horizon_hours=24,
         method="persistence",
-        verbose=True,
-    )[-TIME_STEPS_PER_HOUR * 24 :]
-    rt_prices = get_forecast(
-        data,
-        current_time=current_time,
-        horizon_hours=38,
-        market="RT",
-        method="persistence",
-        verbose=True,
-    )[-TIME_STEPS_PER_HOUR * 24 :]
+        verbose=False,
+    )
 
     # Battery parameters
     battery = BatteryParams()
@@ -45,15 +35,13 @@ def test_da_scheduler():
 
     # Create figure with subplots
     fig, axes = plt.subplots(4, 1, figsize=(10, 12))
-    print(len(da_prices.index), "LENGTH INDEX")
-    print(len(result.soc_schedule), "LENGTH SOC")
 
     # Plot 1: SOC Schedule
     axes[0].plot(da_prices.index, result.soc_schedule[:-1])
     axes[0].set_title("State of Charge Schedule")
     axes[0].set_ylabel("SOC")
     axes[0].grid(True)
-    print(da_prices.index)
+
     # Plot 2: Power (DA bids, RT bids, and Dispatch)
     axes[1].plot(da_prices.index, result.da_energy_bids, label="DA energy bids")
     axes[1].plot(da_prices.index, result.rt_energy_bids, label="RT energy bids")
@@ -62,7 +50,7 @@ def test_da_scheduler():
     axes[1].set_ylabel("Power")
     axes[1].legend()
     axes[1].grid(True)
-    
+
     # Plot 3: Prices
     axes[2].plot(da_prices.index, da_prices, label="DA prices")
     axes[2].plot(da_prices.index, rt_prices, label="RT prices")
@@ -70,7 +58,7 @@ def test_da_scheduler():
     axes[2].set_ylabel("Price ($/MWh)")
     axes[2].legend()
     axes[2].grid(True)
-    
+
     # Plot 4: Charge/Discharge
     axes[3].plot(result.diagnostic_information["charge"][:-1], label="Charge")
     axes[3].plot(result.diagnostic_information["discharge"][:-1], label="Discharge")
@@ -79,7 +67,7 @@ def test_da_scheduler():
     axes[3].set_xlabel("Time Step")
     axes[3].legend()
     axes[3].grid(True)
-    
+
     plt.tight_layout()
     plt.savefig("tests/da_scheduler_results.png", dpi=150)
     plt.show()

@@ -128,11 +128,10 @@ def run_simulation_comparison():
     sim_date_da = sim_date - pd.Timedelta(hours=14)
     horizon_hours = 4
     sim_hours = 24
-    steps_per_hour = TIME_STEPS_PER_HOUR
-    sim_steps = sim_hours * steps_per_hour
+    sim_steps = sim_hours * TIME_STEPS_PER_HOUR
 
     # Buffer for receding horizon
-    total_data_steps = sim_steps + (horizon_hours * steps_per_hour) + 10
+    total_data_steps = sim_steps + (horizon_hours * TIME_STEPS_PER_HOUR) + 10
 
     battery = BatteryParams()
 
