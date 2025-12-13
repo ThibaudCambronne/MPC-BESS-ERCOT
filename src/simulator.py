@@ -1,21 +1,24 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 import os
 from typing import Literal, Optional
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
 from .battery_model import BatteryParams
-from .utils import DaySimulationResult, SimulationResult, DAScheduleResult
 from .forecaster import get_forecast, get_forecasts_for_da
+from .globals import DELTA_T, TIME_STEPS_PER_HOUR
 from .stage1_da_scheduler import solve_da_schedule
 from .stage2_rt_mpc import solve_rt_mpc
-from .globals import DELTA_T, PRICE_NODE
+from .utils import DAScheduleResult, DaySimulationResult, SimulationResult
+
 
 def plot_day_simulation(
     day_result: DaySimulationResult,
     actual_da_prices: np.ndarray,
     actual_rt_prices: np.ndarray,
     da_schedule: Optional[DAScheduleResult] = None,
-    save_path: str = None
+    save_path: str = None,
 ) -> None:
     """
     Plot results from a single day simulation with real timestamps.
@@ -25,14 +28,10 @@ def plot_day_simulation(
         # Create real timestamp axis (15-min intervals)
         day_start = day_result.date
         timestamps = pd.date_range(
-            start=day_start,
-            periods=len(day_result.power_trajectory),
-            freq='15min'
+            start=day_start, periods=len(day_result.power_trajectory), freq="15min"
         )
         soc_timestamps = pd.date_range(
-            start=day_start,
-            periods=len(day_result.soc_trajectory),
-            freq='15min'
+            start=day_start, periods=len(day_result.soc_trajectory), freq="15min"
         )
 
         fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(14, 18), sharex=True)
@@ -45,8 +44,18 @@ def plot_day_simulation(
 
         cum_revenue = np.cumsum(step_revenues)
 
-        ax1.set_title(f"Day Simulation Results - {day_result.date.date()}", fontsize=14, fontweight='bold')
-        ax1.plot(timestamps, cum_revenue, "g-", linewidth=2, label=f"Cumulative Revenue (Total: ${day_result.total_revenue:.2f})")
+        ax1.set_title(
+            f"Day Simulation Results - {day_result.date.date()}",
+            fontsize=14,
+            fontweight="bold",
+        )
+        ax1.plot(
+            timestamps,
+            cum_revenue,
+            "g-",
+            linewidth=2,
+            label=f"Cumulative Revenue (Total: ${day_result.total_revenue:.2f})",
+        )
         ax1.set_ylabel("Cumulative Revenue [$]")
         ax1.legend()
         ax1.grid(True, alpha=0.3)
@@ -55,22 +64,50 @@ def plot_day_simulation(
         ax2.set_title("Market Prices: Forecast (used by DA) vs Actual")
 
         # Plot actual prices (solid lines)
-        ax2.plot(timestamps, actual_da_prices, "b-", alpha=0.7, linewidth=1.5, label="DA Actual")
-        ax2.plot(timestamps, actual_rt_prices, "r-", alpha=0.7, linewidth=1.5, label="RT Actual")
+        ax2.plot(
+            timestamps,
+            actual_da_prices,
+            "b-",
+            alpha=0.7,
+            linewidth=1.5,
+            label="DA Actual",
+        )
+        ax2.plot(
+            timestamps,
+            actual_rt_prices,
+            "r-",
+            alpha=0.7,
+            linewidth=1.5,
+            label="RT Actual",
+        )
 
         # Plot forecast prices if available (dashed lines)
-        if (da_schedule is not None and
-            da_schedule.da_price_forecast is not None and
-            da_schedule.rt_price_forecast is not None):
-            da_forecast = da_schedule.da_price_forecast[:len(timestamps)]
-            rt_forecast = da_schedule.rt_price_forecast[:len(timestamps)]
-            ax2.plot(timestamps, da_forecast, "b--", alpha=0.5, linewidth=1.5,
-                    label="DA Forecast (used by optimizer)")
-            ax2.plot(timestamps, rt_forecast, "r--", alpha=0.5, linewidth=1.5,
-                    label="RT Forecast (used by optimizer)")
+        if (
+            da_schedule is not None
+            and da_schedule.da_price_forecast is not None
+            and da_schedule.rt_price_forecast is not None
+        ):
+            da_forecast = da_schedule.da_price_forecast[: len(timestamps)]
+            rt_forecast = da_schedule.rt_price_forecast[: len(timestamps)]
+            ax2.plot(
+                timestamps,
+                da_forecast,
+                "b--",
+                alpha=0.5,
+                linewidth=1.5,
+                label="DA Forecast (used by optimizer)",
+            )
+            ax2.plot(
+                timestamps,
+                rt_forecast,
+                "r--",
+                alpha=0.5,
+                linewidth=1.5,
+                label="RT Forecast (used by optimizer)",
+            )
 
         ax2.set_ylabel("Price [$/MWh]")
-        ax2.legend(loc='upper right', fontsize=8)
+        ax2.legend(loc="upper right", fontsize=8)
         ax2.grid(True, alpha=0.3)
 
         # 3. Battery Power Dispatch - COMPARE DA PLAN VS RT ACTUAL
@@ -78,25 +115,49 @@ def plot_day_simulation(
 
         # Plot DA planned dispatch
         if da_schedule is not None:
-            da_power = da_schedule.power_dispatch_schedule[:len(timestamps)]
-            ax3.plot(timestamps, da_power, "gray", linewidth=2, alpha=0.6,
-                    linestyle='--', label='DA Plan (computed day before)')
+            da_power = da_schedule.power_dispatch_schedule[: len(timestamps)]
+            ax3.plot(
+                timestamps,
+                da_power,
+                "gray",
+                linewidth=2,
+                alpha=0.6,
+                linestyle="--",
+                label="DA Plan (computed day before)",
+            )
 
         # Plot actual RT dispatch
-        ax3.plot(timestamps, day_result.power_trajectory, "purple", linewidth=2,
-                label='RT Actual (MPC dispatched)')
+        ax3.plot(
+            timestamps,
+            day_result.power_trajectory,
+            "purple",
+            linewidth=2,
+            label="RT Actual (MPC dispatched)",
+        )
         ax3.axhline(y=0, color="black", linestyle="-", alpha=0.3, linewidth=0.5)
 
         # Shade discharge/charge regions for actual
-        ax3.fill_between(timestamps, 0, day_result.power_trajectory,
-                         where=(day_result.power_trajectory < 0),
-                         color='red', alpha=0.2, label='Actual Discharge')
-        ax3.fill_between(timestamps, 0, day_result.power_trajectory,
-                         where=(day_result.power_trajectory > 0),
-                         color='blue', alpha=0.2, label='Actual Charge')
+        ax3.fill_between(
+            timestamps,
+            0,
+            day_result.power_trajectory,
+            where=(day_result.power_trajectory < 0),
+            color="red",
+            alpha=0.2,
+            label="Actual Discharge",
+        )
+        ax3.fill_between(
+            timestamps,
+            0,
+            day_result.power_trajectory,
+            where=(day_result.power_trajectory > 0),
+            color="blue",
+            alpha=0.2,
+            label="Actual Charge",
+        )
 
         ax3.set_ylabel("Power [MW]")
-        ax3.legend(loc='upper right')
+        ax3.legend(loc="upper right")
         ax3.grid(True, alpha=0.3)
 
         # 4. State of Charge - COMPARE DA PLAN VS RT ACTUAL
@@ -105,17 +166,27 @@ def plot_day_simulation(
         # Plot DA planned SOC
         if da_schedule is not None:
             da_soc_timestamps = pd.date_range(
-                start=day_start,
-                periods=len(da_schedule.soc_schedule),
-                freq='15min'
+                start=day_start, periods=len(da_schedule.soc_schedule), freq="15min"
             )
-            ax4.plot(da_soc_timestamps, da_schedule.soc_schedule, "gray",
-                    linewidth=2, alpha=0.6, linestyle='--', label='DA Plan')
+            ax4.plot(
+                da_soc_timestamps,
+                da_schedule.soc_schedule,
+                "gray",
+                linewidth=2,
+                alpha=0.6,
+                linestyle="--",
+                label="DA Plan",
+            )
 
         # Plot actual RT SOC
-        ax4.plot(soc_timestamps, day_result.soc_trajectory, "orange", linewidth=2,
-                label='RT Actual')
-        ax4.axhline(y=0.5, color='gray', linestyle=':', alpha=0.5, label='Target (50%)')
+        ax4.plot(
+            soc_timestamps,
+            day_result.soc_trajectory,
+            "orange",
+            linewidth=2,
+            label="RT Actual",
+        )
+        ax4.axhline(y=0.5, color="gray", linestyle=":", alpha=0.5, label="Target (50%)")
         ax4.set_ylabel("SoC [0-1]")
         ax4.set_xlabel("Time")
         ax4.legend()
@@ -123,9 +194,10 @@ def plot_day_simulation(
 
         # Format x-axis to show time nicely
         import matplotlib.dates as mdates
-        ax4.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+
+        ax4.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
         ax4.xaxis.set_major_locator(mdates.HourLocator(interval=2))
-        plt.setp(ax4.xaxis.get_majorticklabels(), rotation=45, ha='right')
+        plt.setp(ax4.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
         plt.tight_layout()
 
@@ -138,6 +210,7 @@ def plot_day_simulation(
     except Exception as e:
         print(f"Day plotting error: {e}")
 
+
 def simulate_day(
     data: pd.DataFrame,
     date: pd.Timestamp,
@@ -145,7 +218,7 @@ def simulate_day(
     da_schedule: "DAScheduleResult",
     battery: BatteryParams,
     forecast_method: Literal["persistence", "perfect"],
-    horizon_type: Literal["shrinking", "receding"] = "receding"
+    horizon_type: Literal["shrinking", "receding"] = "receding",
 ) -> DaySimulationResult:
     """
     Simulate one complete day (24 hours) using pre-computed DA commitments.
@@ -185,16 +258,17 @@ def simulate_day(
     day_start = pd.Timestamp(date).normalize()
     day_end = day_start + pd.Timedelta(days=1)
 
-    # Extract day's actual data for revenue calculation
-    day_data = data.loc[day_start:day_end - pd.Timedelta(minutes=15)]
-    if len(day_data) != 96:
-        raise ValueError(f"Expected 96 intervals for date {date}, got {len(day_data)}")
-
     # Get actual prices for the day for revenue calculation
-    actual_rt_prices = day_data[f"{PRICE_NODE}_RTM"].values
+    actual_rt_prices = get_forecast(
+        data=data,
+        current_time=day_start,
+        horizon_hours=24,
+        market="RT",
+        method="perfect",
+    )
 
     # === Stage 2: Real-Time MPC (run every 15 minutes) ===
-    num_intervals = 96
+    num_intervals = TIME_STEPS_PER_HOUR * 24  # 96 intervals in 24 hours
     soc_trajectory = np.zeros(num_intervals + 1)
     power_trajectory = np.zeros(num_intervals)  # Actual dispatched power
     soc_trajectory[0] = initial_soc
@@ -209,7 +283,7 @@ def simulate_day(
             current_time=current_time,
             horizon_hours=24,
             market="RT",
-            method=forecast_method
+            method=forecast_method,
         )
 
         # Solve RT MPC
@@ -219,7 +293,7 @@ def simulate_day(
             rt_price_forecast=rt_price_forecast,
             da_commitments=da_schedule,
             battery=battery,
-            horizon_type=horizon_type
+            horizon_type=horizon_type,
         )
 
         # Apply power setpoint
@@ -271,44 +345,55 @@ def simulate_day(
         rt_revenue=rt_revenue,
         soc_trajectory=soc_trajectory,
         power_trajectory=power_trajectory,
-        final_soc=soc_trajectory[-1]
+        final_soc=soc_trajectory[-1],
     )
 
-def plot_multi_day_simulation(
-    results: SimulationResult,
-    save_path: str = None
-) -> None:
+
+def plot_multi_day_simulation(results: SimulationResult, save_path: str = None) -> None:
     """
     Plot results from multi-day simulation.
     """
     try:
         n_days = len(results.daily_results)
         dates = [day.date for day in results.daily_results]
-        
+
         fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 12))
-        
+
         # 1. Cumulative Revenue Over Days
         ax1.set_title("Multi-Day Simulation Results")
-        ax1.plot(dates, results.cumulative_revenue, "g-", linewidth=2, marker="o", 
-                label=f"Total Revenue: ${results.total_revenue:.2f}")
+        ax1.plot(
+            dates,
+            results.cumulative_revenue,
+            "g-",
+            linewidth=2,
+            marker="o",
+            label=f"Total Revenue: ${results.total_revenue:.2f}",
+        )
         ax1.set_ylabel("Cumulative Revenue [$]")
         ax1.legend()
         ax1.grid(True)
         ax1.tick_params(axis="x", rotation=45)
-        
+
         # 2. Daily Revenue Breakdown
         daily_revenues = [day.total_revenue for day in results.daily_results]
         da_revenues = [day.da_revenue for day in results.daily_results]
         rt_revenues = [day.rt_revenue for day in results.daily_results]
-        
+
         ax2.set_title("Daily Revenue Breakdown")
         ax2.bar(dates, da_revenues, alpha=0.7, label="DA Revenue", color="blue")
-        ax2.bar(dates, rt_revenues, bottom=da_revenues, alpha=0.7, label="RT Revenue", color="red")
+        ax2.bar(
+            dates,
+            rt_revenues,
+            bottom=da_revenues,
+            alpha=0.7,
+            label="RT Revenue",
+            color="red",
+        )
         ax2.set_ylabel("Daily Revenue [$]")
         ax2.legend()
         ax2.grid(True, axis="y")
         ax2.tick_params(axis="x", rotation=45)
-        
+
         # 3. Final SOC Each Day
         final_socs = [day.final_soc for day in results.daily_results]
         ax3.set_title("End-of-Day State of Charge")
@@ -317,17 +402,18 @@ def plot_multi_day_simulation(
         ax3.set_xlabel("Date")
         ax3.grid(True)
         ax3.tick_params(axis="x", rotation=45)
-        
+
         plt.tight_layout()
-        
+
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
             print(f"Multi-day plot saved to: {os.path.abspath(save_path)}")
-        
+
         plt.close()
-        
+
     except Exception as e:
         print(f"Multi-day plotting error: {e}")
+
 
 def run_simulation(
     data: pd.DataFrame,
@@ -337,7 +423,7 @@ def run_simulation(
     forecast_method: Literal["persistence", "perfect"] = "perfect",
     horizon_type: Literal["shrinking", "receding"] = "receding",
     initial_soc: float = 0.5,
-    end_of_day_soc: float = 0.5
+    end_of_day_soc: float = 0.5,
 ) -> SimulationResult:
     """
     Run multi-day battery energy storage simulation with realistic DA market timing.
@@ -388,7 +474,7 @@ def run_simulation(
     start = pd.Timestamp(start_date).normalize()
 
     # Generate list of dates to simulate
-    dates = pd.date_range(start=start, periods=n_days, freq='D')
+    dates = pd.date_range(start=start, periods=n_days, freq="D")
 
     # Initialize storage
     daily_results = []
@@ -398,13 +484,13 @@ def run_simulation(
     current_soc = initial_soc
     da_schedules = {}  # Maps date -> DAScheduleResult
 
-    print(f"\n{'='*60}")
-    print(f"SIMULATION SETUP")
-    print(f"{'='*60}")
+    print(f"\n{'=' * 60}")
+    print("SIMULATION SETUP")
+    print(f"{'=' * 60}")
     print(f"Simulating {n_days} days: {dates[0].date()} to {dates[-1].date()}")
     print(f"Initial SOC: {initial_soc:.1%}, Target EOD SOC: {end_of_day_soc:.1%}")
     print(f"Forecast method: {forecast_method}, Horizon type: {horizon_type}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     # Pre-compute DA schedules for all days
     # For each day, run DA scheduler at 10 AM the previous day
@@ -416,10 +502,7 @@ def run_simulation(
 
         # Get forecasts using the special DA function
         da_prices, rt_prices = get_forecasts_for_da(
-            data=data,
-            current_time=da_time,
-            horizon_hours=24,
-            method=forecast_method
+            data=data, current_time=da_time, horizon_hours=24, method=forecast_method
         )
 
         # Estimate SOC at start of the target day
@@ -436,7 +519,7 @@ def run_simulation(
             rt_price_forecast=rt_prices,
             battery=battery,
             initial_soc=est_initial_soc,
-            end_of_day_soc=end_of_day_soc
+            end_of_day_soc=end_of_day_soc,
         )
 
         # Store forecast prices used (for debugging/plotting)
@@ -446,12 +529,12 @@ def run_simulation(
         da_schedules[sim_date] = da_schedule
 
     # Now simulate each day using the pre-computed DA schedules
-    print(f"\n{'='*60}")
-    print(f"RUNNING REAL-TIME SIMULATION")
-    print(f"{'='*60}\n")
+    print(f"\n{'=' * 60}")
+    print("RUNNING REAL-TIME SIMULATION")
+    print(f"{'=' * 60}\n")
 
     for i, sim_date in enumerate(dates):
-        print(f"[{sim_date}] Simulating day {i+1}/{n_days}...")
+        print(f"[{sim_date}] Simulating day {i + 1}/{n_days}...")
 
         # Get DA schedule for this day (computed at 10 AM yesterday)
         da_schedule = da_schedules[sim_date]
@@ -464,7 +547,7 @@ def run_simulation(
             da_schedule=da_schedule,
             battery=battery,
             forecast_method=forecast_method,
-            horizon_type=horizon_type
+            horizon_type=horizon_type,
         )
 
         # Store results
@@ -474,12 +557,14 @@ def run_simulation(
         if i == 0:
             cumulative_revenue[i] = day_result.total_revenue
         else:
-            cumulative_revenue[i] = cumulative_revenue[i-1] + day_result.total_revenue
+            cumulative_revenue[i] = cumulative_revenue[i - 1] + day_result.total_revenue
 
         # Update SOC for next day
         current_soc = day_result.final_soc
 
-        print(f"  Revenue: ${day_result.total_revenue:,.2f}, Final SOC: {day_result.final_soc:.1%}")
+        print(
+            f"  Revenue: ${day_result.total_revenue:,.2f}, Final SOC: {day_result.final_soc:.1%}"
+        )
 
     # Calculate total revenue
     total_revenue = float(sum(day.total_revenue for day in daily_results))
@@ -488,5 +573,5 @@ def run_simulation(
         daily_results=daily_results,
         cumulative_revenue=cumulative_revenue,
         total_revenue=total_revenue,
-        da_schedules=da_schedules
+        da_schedules=da_schedules,
     )
