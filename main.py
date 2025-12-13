@@ -14,17 +14,21 @@ def main():
     battery = BatteryParams()
 
     # Run a short simulation (3 days as a test)
-    start_date = pd.Timestamp("2020-01-02")
-    end_date = pd.Timestamp("2020-01-04")
+    # Note: Start from 2020-01-03 to ensure persistence forecast has previous day's data
+    # start_date = pd.Timestamp("2020-01-03")
+    start_date = pd.Timestamp("2025-02-02")
+    n_days = 3
 
-    print(f"\nRunning simulation from {start_date.date()} to {end_date.date()}...")
+    print(f"\nRunning {n_days}-day simulation starting {start_date.date()}...")
     results = run_simulation(
         data=data,
         start_date=start_date,
-        end_date=end_date,
+        n_days=n_days,
         battery=battery,
-        forecast_method="perfect",
-        horizon_type="receding"
+        forecast_method="persistence",
+        horizon_type="receding",
+        initial_soc=0.5,
+        end_of_day_soc=0.5
     )
 
     print("\n" + "="*60)
@@ -46,6 +50,7 @@ def main():
     print("\nGenerating plots...")
     
     # Multi-day overview plot
+    end_date = start_date + pd.Timedelta(days=n_days-1)
     multi_day_plot_path = os.path.join(plots_dir, f"multi_day_simulation_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.png")
     plot_multi_day_simulation(results, save_path=multi_day_plot_path)
     
@@ -55,16 +60,20 @@ def main():
         day_start = day_result.date.normalize()
         day_end = day_start + pd.Timedelta(days=1)
         day_data = data.loc[day_start:day_end - pd.Timedelta(minutes=15)]
-        
+
         if len(day_data) == 96:
             actual_da_prices = day_data[f"{PRICE_NODE}_DAM"].values
             actual_rt_prices = day_data[f"{PRICE_NODE}_RTM"].values
-            
+
+            # Get DA schedule for this day
+            da_schedule = results.da_schedules.get(day_result.date)
+
             day_plot_path = os.path.join(plots_dir, f"day_simulation_{day_result.date.strftime('%Y%m%d')}.png")
             plot_day_simulation(
-                day_result, 
-                actual_da_prices, 
-                actual_rt_prices, 
+                day_result,
+                actual_da_prices,
+                actual_rt_prices,
+                da_schedule=da_schedule,
                 save_path=day_plot_path
             )
     

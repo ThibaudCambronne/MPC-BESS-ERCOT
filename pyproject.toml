@@ -13,6 +13,7 @@ dependencies = [
     "pip>=25.3",
     "pytest>=9.0.2",
     "pyomo>=6.9.5",
+    "logging>=0.4.9.6",
 ]
 
 [build-system]
