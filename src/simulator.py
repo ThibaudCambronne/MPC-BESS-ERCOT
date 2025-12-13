@@ -206,6 +206,14 @@ def simulate_day(
         method="perfect",
     )
 
+    actual_da_prices = get_forecast(
+        data=data,
+        current_time=day_start,
+        horizon_hours=24,
+        market="DA",
+        method="perfect",
+    )
+
     # === Stage 2: Real-Time MPC (run every 15 minutes) ===
     num_intervals = TIME_STEPS_PER_HOUR * 24  # 96 intervals in 24 hours
     soc_trajectory = np.zeros(num_intervals + 1)
@@ -263,8 +271,8 @@ def simulate_day(
     # 2. RT Market: Revenue from difference between actual dispatch and DA bids at RT prices
     
     # Get actual DA prices for the day
-    actual_da_prices = day_data[f"{PRICE_NODE}_DAM"].values
     actual_rt_prices_arr = np.array(actual_rt_prices)
+
     
     # Get DA power bids (what we committed to in DA market)
     da_power_bids = da_schedule.da_energy_bids[:len(power_trajectory)]
