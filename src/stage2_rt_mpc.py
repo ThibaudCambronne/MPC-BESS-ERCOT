@@ -128,7 +128,8 @@ def solve_rt_mpc(
         # Slack Penalty
         cost_slack = sum(w_slack * m.s_soc[t] for t in m.T_E)
         
-        return cost_market + cost_tracking + cost_slack
+        #return cost_market + cost_tracking + cost_slack
+        return cost_market + cost_slack
 
     model.objective = pyo.Objective(rule=obj_rule, sense=pyo.minimize)
 
