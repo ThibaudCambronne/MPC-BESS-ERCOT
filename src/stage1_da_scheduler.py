@@ -16,8 +16,8 @@ def solve_da_schedule(
     rt_dispatches_per_hour: float = 4,
     end_of_day_soc: float = 0.5,
     cvar_alpha: float = 0.95,
-    cvar_weight: float = 5,
-    rt_dispatch_penalty: float = 2, 
+    cvar_weight: float = 20,
+    rt_dispatch_penalty: float = 5, 
     n_scenarios: int = 100,
     scenario_seed: Optional[int] = None,
 ) -> DAScheduleResult:
@@ -36,7 +36,7 @@ def solve_da_schedule(
     battery : BatteryParams
         Battery parameters (capacity, power limits, efficiency, etc.)
     rt_price_uncertainty : Optional[pd.Series]
-        Real-time price uncertainty/volatility for each hour
+        Real-time price uncertainty/volatility for each hour, defaults to ones * rt_dispatch_penalty
     reg_up_price : Optional[pd.Series]
         Regulation up capacity prices for 24 hours [$/MW]
     reg_down_price : Optional[pd.Series]
@@ -75,7 +75,7 @@ def solve_da_schedule(
     if rt_price_uncertainty is not None:
         rt_uncertainty = rt_price_uncertainty.values
     else:
-        rt_uncertainty = np.ones(T) * 5
+        rt_uncertainty = np.ones(T) * rt_dispatch_penalty
     
     # Generate RT price scenarios
     if scenario_seed is not None:
