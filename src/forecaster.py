@@ -42,10 +42,10 @@ def get_forecast(
             freq=FREQUENCY,
         )
         # Check if all previous day times exist in the data
-        missing = [t for t in prev_day_times if t not in data.index]
-        if missing:
+        missing = prev_day_times.difference(data.index)
+        if not missing.empty:
             raise ValueError(
-                f"Missing historical data for persistence forecast at: {missing}"
+                f"Missing historical data for persistence forecast at: {list(missing)}"
             )
         forecast_values = data.loc[prev_day_times, price_col].values
         # At this point, the forecast length is only 24 hours worth of data
@@ -63,6 +63,11 @@ def get_forecast(
         # Ensure data is indexed by datetime
         if not data.index.is_monotonic_increasing:
             data = data.sort_index()
+
+        # Check that the forecast window exists in the data
+        missing = time_index.difference(data.index)
+        if not missing.empty:
+            raise ValueError(f"Missing data for perfect forecast at: {list(missing)}")
         # Get the prices for the forecast window
         forecast = data.loc[time_index, price_col].copy()
         forecast.name = f"{market}_forecast"
