@@ -13,6 +13,8 @@ dependencies = [
     "pip>=25.3",
     "pytest>=9.0.2",
     "pyomo>=6.9.5",
+    "scikit-learn>=1.8.0",
+    "torch>=2.9.1",
 ]
 
 [build-system]

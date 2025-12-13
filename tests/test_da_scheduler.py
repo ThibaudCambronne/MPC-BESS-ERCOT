@@ -8,13 +8,21 @@ from src.stage1_da_scheduler import solve_da_schedule
 from src.utils import load_ercot_data
 
 
-AMT_DAYS = 7
+AMT_DAYS = 3
 def test_da_scheduler():
     data = load_ercot_data()
-    current_time = pd.Timestamp("2025-10-25 10:00:00")
+    current_time = pd.Timestamp("2025-02-10 10:00:00")
+    print(data.head())
     
     # 1. Prices for the scheduler (Persistence Forecast)
     da_prices_forecast, rt_prices_forecast = get_forecasts_for_da(
+        data,
+        current_time=current_time,
+        horizon_hours=24 * AMT_DAYS,
+        method="regression",
+        verbose=False,
+    )
+    da_prices_forecast_persistence, rt_prices_forecast_persistence = get_forecasts_for_da(
         data,
         current_time=current_time,
         horizon_hours=24 * AMT_DAYS,
@@ -49,7 +57,7 @@ def test_da_scheduler():
             "color": "tab:blue",
             "linestyle": "-"
         },
-        "Risk-Averse (w=0.5, Unc=20)": {
+        "Risk-Averse Regression (w=0.5, Unc=20)": {
             "cvar_weight": 0.5,
             "rt_uncertainty_default": 20,
             "rt_dispatch_penalty": 0,
@@ -58,7 +66,7 @@ def test_da_scheduler():
             "color": "tab:orange",
             "linestyle": "--"
         },
-        "Conservative (w=0.1, Unc=20)": {
+        "Conservative Regression (w=0.1, Unc=20)": {
             "cvar_weight": 0.1,
             "rt_uncertainty_default": 20,
             "rt_dispatch_penalty": 0,
@@ -67,13 +75,23 @@ def test_da_scheduler():
             "color": "tab:green",
             "linestyle": ":"
         },
-        "Perfect Uncertainty (w=0.5)": { # NEW SCENARIO
+        "Perfect Uncertainty Regression (w=0.5)": { # NEW SCENARIO
             "cvar_weight": 0.1, 
             "rt_uncertainty_default": 0,
             "rt_dispatch_penalty": 0,
             "rt_price_uncertainty": perfect_uncertainty_forecast, # <-- Use the Series
             "forecast_input": (da_prices_forecast, rt_prices_forecast),
             "color": "tab:purple",
+            "linestyle": "-."
+        },
+         "Persistence (w=0.5)": { # NEW SCENARIO
+            "cvar_weight": 0.1, 
+            "rt_uncertainty_default": 0,
+            "rt_dispatch_penalty": 0,
+            "forecast_type": "persistence",
+            "rt_price_uncertainty": None, 
+            "forecast_input": (da_prices_forecast_persistence, rt_prices_forecast_persistence),
+            "color": "tab:red",
             "linestyle": "-."
         },
         "Perfect Prediction (w=0, p=0)": { 
@@ -105,7 +123,7 @@ def test_da_scheduler():
             cvar_weight=params["cvar_weight"],
             rt_uncertainty_default=params["rt_uncertainty_default"],
             rt_dispatch_penalty=params["rt_dispatch_penalty"],
-            rt_price_uncertainty=params["rt_price_uncertainty"] # <-- Added new argument
+            rt_price_uncertainty=params["rt_price_uncertainty"],
         )
 
         # The 'real' revenue calculation MUST always use the REAL market prices, 
