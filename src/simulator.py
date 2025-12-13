@@ -259,9 +259,10 @@ def simulate_day(
 
         soc_next = current_soc + energy_change_mwh / battery.capacity_mwh
 
-        # Clamp SOC to valid range
+        # Clamp SOC to valid range and log if clamping occurs
         if not (battery.soc_min <= soc_next <= battery.soc_max):
-            raise logging.warning(f"SOC out of bounds at {current_time}: {soc_next}")
+            logging.warning(f"SOC out of bounds at {current_time}: {soc_next}, clamping to [{battery.soc_min}, {battery.soc_max}]")
+            soc_next = np.clip(soc_next, battery.soc_min, battery.soc_max)
 
         soc_trajectory[t + 1] = soc_next
 
