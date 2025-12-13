@@ -2,7 +2,21 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+import pandas as pd
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
+
 
 def test_imports():
-    pass
+    from src.forecaster import get_forecast
+
+    current_time = pd.Timestamp.now()
+    print(
+        get_forecast(
+            data=pd.DataFrame(),
+            current_time=current_time,
+            horizon_hours=5,
+            market="DA",
+            method="persistence",
+        )
+    )
