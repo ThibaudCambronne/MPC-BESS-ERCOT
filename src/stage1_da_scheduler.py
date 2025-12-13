@@ -16,8 +16,9 @@ def solve_da_schedule(
     rt_dispatches_per_hour: float = 4,
     end_of_day_soc: float = 0.5,
     cvar_alpha: float = 0.95,
-    cvar_weight: float = 20,
-    rt_dispatch_penalty: float = 5, 
+    cvar_weight: float = 0.5,
+    rt_dispatch_penalty: float = 0, 
+    rt_uncertainty_default: float = 20,
     n_scenarios: int = 100,
     scenario_seed: Optional[int] = None,
 ) -> DAScheduleResult:
@@ -25,7 +26,8 @@ def solve_da_schedule(
     Solve Stage 1 DA optimization problem with CVaR risk measure using Pyomo.
     
     CVaR is applied to total profit uncertainty across scenarios.
-    Optionally penalize RT dispatch to discourage relying on RT market.
+    We maximize: (1-λ) * E[profit] - λ * CVaR[cost]
+    where CVaR[cost] protects against worst-case costs.
     
     Parameters
     ----------
@@ -36,7 +38,7 @@ def solve_da_schedule(
     battery : BatteryParams
         Battery parameters (capacity, power limits, efficiency, etc.)
     rt_price_uncertainty : Optional[pd.Series]
-        Real-time price uncertainty/volatility for each hour, defaults to ones * rt_dispatch_penalty
+        Real-time price uncertainty/volatility (std dev) for each hour
     reg_up_price : Optional[pd.Series]
         Regulation up capacity prices for 24 hours [$/MW]
     reg_down_price : Optional[pd.Series]
@@ -50,11 +52,9 @@ def solve_da_schedule(
     cvar_alpha : float
         Confidence level for CVaR (0.95 = protect against worst 5%)
     cvar_weight : float
-        Weight on CVaR term vs expected profit
-        0 = risk-neutral, 1 = equal weight, >1 = very risk-averse
+        Weight on CVaR term (0=risk-neutral, 1=full CVaR focus)
     rt_dispatch_penalty : float
-        Penalty per MW of RT dispatch (discourages RT reliance)
-        e.g., 5.0 = add $5/MW penalty to RT dispatch
+        Penalty per MW of RT dispatch to discourage RT reliance [$/MW]
     n_scenarios : int
         Number of RT price scenarios to generate for CVaR calculation
     scenario_seed : Optional[int]
@@ -72,10 +72,12 @@ def solve_da_schedule(
     da_prices = da_price_forecast.values
     rt_prices = rt_price_forecast.values
     
+    # Default uncertainty if not provided
     if rt_price_uncertainty is not None:
         rt_uncertainty = rt_price_uncertainty.values
     else:
-        rt_uncertainty = np.ones(T) * rt_dispatch_penalty
+        # Default: 10% of price or minimum of $5/MWh
+        rt_uncertainty = np.ones(len(rt_prices)) *  rt_uncertainty_default
     
     # Generate RT price scenarios
     if scenario_seed is not None:
@@ -123,13 +125,12 @@ def solve_da_schedule(
     # State of charge
     model.soc = Var(model.T_soc, bounds=(battery.soc_min, battery.soc_max))
     
-    # CVaR variables (applied to total profit across scenarios)
-    model.tau = Var()  # Value-at-Risk (negative profit = cost)
-    model.z = Var(model.S, domain=NonNegativeReals)  # Excess loss beyond VaR
+    # CVaR variables - NOTE: We work with COSTS (negative profit)
+    model.eta = Var()  # Value-at-Risk threshold
+    model.z = Var(model.S, domain=NonNegativeReals)  # Excess cost beyond VaR
     
     # Auxiliary variable for RT dispatch absolute value (for penalty)
-    if rt_dispatch_penalty > 0:
-        model.p_rt_abs = Var(model.T, domain=NonNegativeReals)
+    model.p_rt_abs = Var(model.T, domain=NonNegativeReals)
     
     # ==================== Constraints ====================
     
@@ -188,69 +189,89 @@ def solve_da_schedule(
     )
     
     # RT dispatch absolute value (for penalty term)
-    if rt_dispatch_penalty > 0:
-        def rt_abs_pos_rule(model, t):
-            return model.p_rt_abs[t] >= model.p_rt[t]
-        
-        model.rt_abs_pos = Constraint(model.T, rule=rt_abs_pos_rule)
-        
-        def rt_abs_neg_rule(model, t):
-            return model.p_rt_abs[t] >= -model.p_rt[t]
-        
-        model.rt_abs_neg = Constraint(model.T, rule=rt_abs_neg_rule)
+    def rt_abs_pos_rule(model, t):
+        return model.p_rt_abs[t] >= model.p_rt[t]
     
-    # CVaR constraints (applied to total cost/profit in each scenario)
+    model.rt_abs_pos = Constraint(model.T, rule=rt_abs_pos_rule)
+    
+    def rt_abs_neg_rule(model, t):
+        return model.p_rt_abs[t] >= -model.p_rt[t]
+    
+    model.rt_abs_neg = Constraint(model.T, rule=rt_abs_neg_rule)
+    
+    # CVaR constraints - one per scenario
+    # We define cost = - revenue, so CVaR protects against high costs (low revenues)
     def cvar_rule(model, s):
-        # DA cost (deterministic - same across all scenarios)
-        da_cost = sum(da_prices[t] * model.p_da[t] for t in model.T)
+        # Revenue from DA market (sell at positive prices, buy at negative)
+        # DA cost = price * power (positive when buying, negative when selling)
+        da_revenue = -sum(da_prices[t] * model.p_da[t] for t in model.T)
         
-        # RT cost in this scenario (uncertain)
-        rt_cost = sum(rt_price_scenarios[t, s] * model.p_rt[t] for t in model.T)
+        # Revenue from RT market in this scenario
+        rt_revenue = -sum(rt_price_scenarios[t, s] * model.p_rt[t] for t in model.T)
         
-        # Total cost in this scenario
-        total_cost = da_cost + rt_cost
+        # RT dispatch penalty cost
+        rt_penalty_cost = rt_dispatch_penalty * sum(model.p_rt_abs[t] for t in model.T) / rt_dispatches_per_hour
         
-        # CVaR constraint: z[s] >= (scenario_cost - tau)
-        return model.z[s] >= total_cost - model.tau
+        # Total profit in scenario s (negative cost)
+        scenario_profit = da_revenue + rt_revenue - rt_penalty_cost
+        
+        # Cost = -profit
+        scenario_cost = -scenario_profit
+        
+        # CVaR constraint: z[s] >= (scenario_cost - eta)
+        return model.z[s] >= scenario_cost - model.eta
     
     model.cvar_constraint = Constraint(model.S, rule=cvar_rule)
     
     # ==================== Objective Function ====================
     
-    # DA energy cost (deterministic)
-    da_energy_cost = sum(da_prices[t] * model.p_da[t] for t in model.T)
+    # Expected revenue from DA market (deterministic)
+    da_revenue = -sum(da_prices[t] * model.p_da[t] for t in model.T)
     
-    # Expected RT energy cost (using mean forecast)
-    rt_energy_cost_expected = sum(rt_prices[t] * model.p_rt[t] for t in model.T)
+    # Expected revenue from RT market (using mean forecast)
+    rt_revenue = -sum(rt_prices[t] * model.p_rt[t] for t in model.T)
     
-    # CVaR term (Value-at-Risk + conditional expected excess)
-    cvar_term = model.tau + (1.0 / (1.0 - cvar_alpha)) * sum(model.z[s] for s in model.S) / n_scenarios
+    # RT dispatch penalty
+    rt_penalty_cost = rt_dispatch_penalty * sum(model.p_rt_abs[t] for t in model.T) / rt_dispatches_per_hour
     
-    # RT dispatch penalty (discourages relying on RT market)
-    # Not using the rt dispatch penalty
-    # TODO: Reconsider this 
-    # if rt_dispatch_penalty > 0:
-    if False:
-        rt_penalty = rt_dispatch_penalty * sum(model.p_rt_abs[t] for t in model.T) / rt_dispatches_per_hour
-    else:
-        rt_penalty = 0
+    # Expected profit
+    expected_profit = da_revenue + rt_revenue - rt_penalty_cost
     
-    # Combined objective:
-    # Option 1: Risk-neutral + RT penalty
-    # objective = da_energy_cost + rt_energy_cost_expected + rt_penalty
+    # CVaR term: eta + (1/(1-alpha)) * E[z]
+    # This represents the conditional expected cost in the worst (1-alpha) scenarios
+    cvar_cost = model.eta + (1.0 / (1.0 - cvar_alpha)) * sum(model.z[s] for s in model.S) / n_scenarios
     
-    # Option 2: Weighted expected cost and CVaR + RT penalty
+    # Combined objective: maximize expected profit while minimizing CVaR of cost
+    # = minimize: -(1-λ) * E[profit] + λ * CVaR[cost]
+    # model.obj = Objective(
+    #     expr=-(1.0 - cvar_weight) * expected_profit + cvar_weight * cvar_cost,
+    #     sense=minimize
+    # )
+    
+    # Define scenario profit expression
+    def scenario_profit_expr(model, s):
+        da_rev = -sum(da_prices[t] * model.p_da[t] for t in model.T)
+        rt_rev = -sum(rt_price_scenarios[t, s] * model.p_rt[t] for t in model.T)
+        penalty = rt_dispatch_penalty * sum(model.p_rt_abs[t] for t in model.T) / rt_dispatches_per_hour
+        return da_rev + rt_rev - penalty
+
+    # Expected profit
+    expected_profit = sum(scenario_profit_expr(model, s) for s in model.S) / n_scenarios
+
+    # CVaR term
+    cvar_cost = model.eta + (1.0 / (1.0 - cvar_alpha)) * sum(model.z[s] for s in model.S) / n_scenarios
+
+    # Objective
     model.obj = Objective(
-        expr=(1 - cvar_weight) * (da_energy_cost + rt_energy_cost_expected) + 
-             cvar_weight * cvar_term +
-             rt_penalty,
+        expr=-(1.0 - cvar_weight) * expected_profit + cvar_weight * cvar_cost,
         sense=minimize
     )
-    
+
     # ==================== Solve ====================
     
     solver = SolverFactory('ipopt')
-    results = solver.solve(model, tee=True)
+    solver.options['max_iter'] = 3000
+    results = solver.solve(model, tee=False)
     
     # Check if solution was found
     if results.solver.termination_condition != TerminationCondition.optimal:
@@ -265,21 +286,24 @@ def solve_da_schedule(
     discharge = np.array([value(model.p_discharge[t]) for t in model.T])
     charge = np.array([value(model.p_charge[t]) for t in model.T])
     
-    da_energy_cost_val = sum(da_prices[t] * value(model.p_da[t]) for t in model.T)
+    # Calculate actual revenues
+    da_revenue_val = -np.sum(da_prices * da_energy_bids)
+    rt_revenue_val = -np.sum(rt_prices * rt_energy_bids)
+    rt_penalty_val = rt_dispatch_penalty * np.sum(np.abs(rt_energy_bids)) / rt_dispatches_per_hour
+    expected_profit_val = da_revenue_val + rt_revenue_val - rt_penalty_val
     
-    # Calculate metrics
-    expected_revenue = -value(model.obj)
-    var_value = value(model.tau)
-    cvar_value = var_value + (1.0 / (1.0 - cvar_alpha)) * sum(value(model.z[s]) for s in model.S) / n_scenarios
+    # CVaR metrics
+    eta_value = value(model.eta)
+    cvar_value = eta_value + (1.0 / (1.0 - cvar_alpha)) * sum(value(model.z[s]) for s in model.S) / n_scenarios
     
-    # Calculate scenario costs for diagnostics
+    # Calculate scenario profits for diagnostics
+    scenario_profits = []
     scenario_costs = []
-    scenario_rt_costs = []
     for s in range(n_scenarios):
-        scenario_rt_cost = np.sum(rt_price_scenarios[:, s] * rt_energy_bids)
-        scenario_total_cost = np.sum(da_prices * da_energy_bids) + scenario_rt_cost
-        scenario_costs.append(scenario_total_cost)
-        scenario_rt_costs.append(scenario_rt_cost)
+        scenario_rt_revenue = -np.sum(rt_price_scenarios[:, s] * rt_energy_bids)
+        scenario_profit = da_revenue_val + scenario_rt_revenue - rt_penalty_val
+        scenario_profits.append(scenario_profit)
+        scenario_costs.append(-scenario_profit)
     
     # Calculate RT dispatch magnitude
     rt_dispatch_magnitude = np.sum(np.abs(rt_energy_bids)) / rt_dispatches_per_hour
@@ -291,20 +315,23 @@ def solve_da_schedule(
         soc_schedule=soc_schedule,
         reg_up_capacity=0,
         reg_down_capacity=0,
-        expected_revenue=expected_revenue,
+        expected_revenue=expected_profit_val,
         diagnostic_information={
-            "da_energy_cost": da_energy_cost_val,
+            "da_revenue": da_revenue_val,
+            "rt_revenue": rt_revenue_val,
+            "rt_penalty_cost": rt_penalty_val,
             "discharge": discharge,
             "charge": charge,
-            "var_95": var_value,
-            "cvar_95": cvar_value,
+            "var_threshold": eta_value,
+            "cvar_cost": cvar_value,
+            "scenario_profits": scenario_profits,
             "scenario_costs": scenario_costs,
-            "scenario_rt_costs": scenario_rt_costs,
-            "worst_case_cost": np.max(scenario_costs),
-            "best_case_cost": np.min(scenario_costs),
-            "worst_case_rt_cost": np.max(scenario_rt_costs),
-            "best_case_rt_cost": np.min(scenario_rt_costs),
+            "worst_case_profit": np.min(scenario_profits),
+            "best_case_profit": np.max(scenario_profits),
+            "profit_std": np.std(scenario_profits),
             "rt_dispatch_magnitude": rt_dispatch_magnitude,
             "rt_price_scenarios": rt_price_scenarios,
+            "cvar_weight_used": cvar_weight,
+            "cvar_alpha_used": cvar_alpha,
         }
     )
