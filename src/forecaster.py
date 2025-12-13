@@ -91,3 +91,36 @@ def get_forecast(
         plt.tight_layout()
         plt.show()
     return forecast
+
+
+def get_forecasts_for_da(
+    data: pd.DataFrame,
+    current_time: pd.Timestamp,
+    horizon_hours: int,
+    method: Literal["persistence", "perfect"],
+    price_node: str = PRICE_NODE,
+    verbose: bool = False,
+) -> tuple[pd.Series, pd.Series]:
+    assert current_time.minute == 0 and current_time.hour == 10, (
+        f"For the day ahead forecast, the current time must be at 10:00 AM. Got {current_time} instead."
+    )
+
+    da_prices = get_forecast(
+        data,
+        current_time=current_time,
+        horizon_hours=horizon_hours + 14,
+        market="DA",
+        method=method,
+        price_node=price_node,
+        verbose=verbose,
+    )[-TIME_STEPS_PER_HOUR * horizon_hours :]
+    rt_prices = get_forecast(
+        data,
+        current_time=current_time,
+        horizon_hours=horizon_hours + 14,
+        market="RT",
+        method=method,
+        price_node=price_node,
+        verbose=verbose,
+    )[-TIME_STEPS_PER_HOUR * horizon_hours :]
+    return da_prices, rt_prices
