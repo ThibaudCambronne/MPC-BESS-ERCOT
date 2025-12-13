@@ -7,6 +7,7 @@ from typing import Literal, Optional
 from .battery_model import BatteryParams
 from .utils import DaySimulationResult, SimulationResult, DAScheduleResult
 from .forecaster import get_forecast, get_forecasts_for_da
+from .globals import DELTA_T, TIME_STEPS_PER_HOUR
 from .stage1_da_scheduler import solve_da_schedule
 from .stage2_rt_mpc import solve_rt_mpc
 from .globals import DELTA_T, PRICE_NODE
@@ -196,16 +197,17 @@ def simulate_day(
     day_start = pd.Timestamp(date).normalize()
     day_end = day_start + pd.Timedelta(days=1)
 
-    # Extract day's actual data for revenue calculation
-    day_data = data.loc[day_start:day_end - pd.Timedelta(minutes=15)]
-    if len(day_data) != 96:
-        raise ValueError(f"Expected 96 intervals for date {date}, got {len(day_data)}")
-
     # Get actual prices for the day for revenue calculation
-    actual_rt_prices = day_data[f"{PRICE_NODE}_RTM"].values
+    actual_rt_prices = get_forecast(
+        data=data,
+        current_time=day_start,
+        horizon_hours=24,
+        market="RT",
+        method="perfect",
+    )
 
     # === Stage 2: Real-Time MPC (run every 15 minutes) ===
-    num_intervals = 96
+    num_intervals = TIME_STEPS_PER_HOUR * 24  # 96 intervals in 24 hours
     soc_trajectory = np.zeros(num_intervals + 1)
     power_trajectory = np.zeros(num_intervals)  # Actual dispatched power
     soc_trajectory[0] = initial_soc
@@ -462,12 +464,12 @@ def run_simulation(
         da_schedules[sim_date] = da_schedule
 
     # Now simulate each day using the pre-computed DA schedules
-    print(f"\n{'='*60}")
-    print(f"RUNNING REAL-TIME SIMULATION")
-    print(f"{'='*60}\n")
+    print(f"\n{'=' * 60}")
+    print("RUNNING REAL-TIME SIMULATION")
+    print(f"{'=' * 60}\n")
 
     for i, sim_date in enumerate(dates):
-        print(f"[{sim_date}] Simulating day {i+1}/{n_days}...")
+        print(f"[{sim_date}] Simulating day {i + 1}/{n_days}...")
 
         # Get DA schedule for this day (computed at 10 AM yesterday)
         da_schedule = da_schedules[sim_date]
@@ -480,7 +482,7 @@ def run_simulation(
             da_schedule=da_schedule,
             battery=battery,
             forecast_method=forecast_method,
-            horizon_type=horizon_type
+            horizon_type=horizon_type,
         )
 
         # Store results
@@ -490,12 +492,14 @@ def run_simulation(
         if i == 0:
             cumulative_revenue[i] = day_result.total_revenue
         else:
-            cumulative_revenue[i] = cumulative_revenue[i-1] + day_result.total_revenue
+            cumulative_revenue[i] = cumulative_revenue[i - 1] + day_result.total_revenue
 
         # Update SOC for next day
         current_soc = day_result.final_soc
 
-        print(f"  Revenue: ${day_result.total_revenue:,.2f}, Final SOC: {day_result.final_soc:.1%}")
+        print(
+            f"  Revenue: ${day_result.total_revenue:,.2f}, Final SOC: {day_result.final_soc:.1%}"
+        )
 
     # Calculate total revenue
     total_revenue = float(sum(day.total_revenue for day in daily_results))
