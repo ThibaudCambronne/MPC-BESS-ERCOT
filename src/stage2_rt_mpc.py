@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pyomo.environ as pyo
 
-from src.globals import DELTA_T, FREQUENCY
+from src.globals import DELTA_T, FREQUENCY, MPC_BATTERY_EPSILON
 
 from .battery_model import BatteryParams
 from .utils import DAScheduleResult, RTMPCResult
@@ -62,8 +62,8 @@ def solve_rt_mpc(
     model.c_RT = pyo.Param(model.T, initialize=lambda m, t: c_rt_data[t], mutable=True)
     model.SoC_Target = pyo.Param(model.T, initialize=lambda m, t: soc_target_data[t], mutable=True)
 
-    E_min = battery.soc_min * battery.capacity_mwh
-    E_max = battery.soc_max * battery.capacity_mwh
+    E_min = battery.soc_min * battery.capacity_mwh - MPC_BATTERY_EPSILON
+    E_max = battery.soc_max * battery.capacity_mwh + MPC_BATTERY_EPSILON    
     Z = 2.0
     
     # Weights

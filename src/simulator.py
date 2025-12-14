@@ -39,20 +39,9 @@ def plot_day_simulation(
 
         fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(14, 18), sharex=True)
 
-        # 1. Revenue accumulation - separate DA and RT components
-        da_power_bids = da_schedule.da_energy_bids[:len(day_result.power_trajectory)] if da_schedule else np.zeros(len(day_result.power_trajectory))
-        rt_imbalance = day_result.power_trajectory - da_power_bids
-        
-        da_step_revenues = []
-        rt_step_revenues = []
-        for t in range(len(day_result.power_trajectory)):
-            da_step_rev = -(actual_da_prices[t] * da_power_bids[t] * DELTA_T)
-            rt_step_rev = -(actual_rt_prices[t] * rt_imbalance[t] * DELTA_T)
-            da_step_revenues.append(da_step_rev)
-            rt_step_revenues.append(rt_step_rev)
-        
-        cum_da_revenue = np.cumsum(da_step_revenues)
-        cum_rt_revenue = np.cumsum(rt_step_revenues)
+        # 1. Revenue accumulation - use pre-calculated values from simulation
+        cum_da_revenue = np.cumsum(day_result.da_step_revenues)
+        cum_rt_revenue = np.cumsum(day_result.rt_step_revenues)
         cum_total_revenue = cum_da_revenue + cum_rt_revenue
 
         ax1.set_title(f"Day Simulation Results - {day_result.date.date()}", fontsize=14, fontweight='bold')
@@ -273,22 +262,21 @@ def simulate_day(
     
     # Get actual DA prices for the day
     actual_rt_prices_arr = np.array(actual_rt_prices)
-
+    actual_da_prices_arr = np.array(actual_da_prices)
     
     # Get DA power bids (what we committed to in DA market)
     da_power_bids = da_schedule.da_energy_bids[:len(power_trajectory)]
     
-    # Calculate DA market revenue: DA bids × actual DA prices
-    # Convention: negative power = discharge (we receive money), positive = charge (we pay)
-    da_revenue = float(-np.sum(da_power_bids * actual_da_prices * DELTA_T))
-    
     # Calculate RT market imbalance: actual MPC dispatch - DA bids
-    rt_energy_volume= power_trajectory - da_power_bids
+    rt_imbalance = power_trajectory - da_power_bids
     
-    # Calculate RT market revenue: imbalance × actual RT prices
-    rt_revenue = float(-np.sum(rt_energy_volume * actual_rt_prices_arr * DELTA_T))
+    # Calculate step-by-step revenues for detailed analysis
+    da_step_revenues = np.array([-(actual_da_prices_arr[t] * da_power_bids[t] * DELTA_T) for t in range(len(power_trajectory))])
+    rt_step_revenues = np.array([-(actual_rt_prices_arr[t] * rt_imbalance[t] * DELTA_T) for t in range(len(power_trajectory))])
     
-    # Total revenue = DA revenue + RT revenue
+    # Calculate total revenues
+    da_revenue = float(np.sum(da_step_revenues))
+    rt_revenue = float(np.sum(rt_step_revenues))
     total_revenue = da_revenue + rt_revenue
 
     return DaySimulationResult(
@@ -298,52 +286,254 @@ def simulate_day(
         rt_revenue=rt_revenue,
         soc_trajectory=soc_trajectory,
         power_trajectory=power_trajectory,
-        final_soc=soc_trajectory[-1]
+        final_soc=soc_trajectory[-1],
+        da_step_revenues=da_step_revenues,
+        rt_step_revenues=rt_step_revenues,
+        da_power_bids=da_power_bids,
+        rt_imbalance=rt_imbalance
     )
 
 def plot_multi_day_simulation(
     results: SimulationResult,
+    data: pd.DataFrame,
+    battery: BatteryParams,
     save_path: str = None
 ) -> None:
     """
-    Plot results from multi-day simulation.
+    Plot comprehensive multi-day simulation results with 4 key visualizations.
+    Includes perfect forecast comparison by running DA scheduler with perfect forecasts.
     """
     try:
         n_days = len(results.daily_results)
         dates = [day.date for day in results.daily_results]
         
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 12))
+        # Create 2x2 subplot layout
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
         
-        # 1. Cumulative Revenue Over Days
-        ax1.set_title("Multi-Day Simulation Results")
-        ax1.plot(dates, results.cumulative_revenue, "g-", linewidth=2, marker="o", 
-                label=f"Total Revenue: ${results.total_revenue:.2f}")
+        # === 1. CUMULATIVE REVENUE COMPARISON (15-min resolution) ===
+        ax1.set_title(f"Cumulative Revenue Comparison ({n_days} days)", fontweight='bold')
+        
+        # Build continuous time series for actual results
+        all_timestamps = []
+        actual_total_revenue = []
+        actual_da_revenue = []
+        da_only_revenue = []
+        
+        for day_result in results.daily_results:
+            # Create timestamps for this day (15-min intervals)
+            day_timestamps = pd.date_range(
+                start=day_result.date,
+                periods=len(day_result.power_trajectory),
+                freq='15min'
+            )
+            
+            # Accumulate revenues within this day, then add to total
+            day_cum_total = np.cumsum(day_result.da_step_revenues + day_result.rt_step_revenues)
+            day_cum_da = np.cumsum(day_result.da_step_revenues)
+            
+            # Add previous days' totals if not first day
+            if len(actual_total_revenue) > 0:
+                prev_total = actual_total_revenue[-1]
+                prev_da = actual_da_revenue[-1]
+                day_cum_total += prev_total
+                day_cum_da += prev_da
+            
+            all_timestamps.extend(day_timestamps)
+            actual_total_revenue.extend(day_cum_total)
+            actual_da_revenue.extend(day_cum_da)
+            da_only_revenue.extend(day_cum_da)  # DA-only is just DA revenue
+        
+        # === COMPUTE IDEAL REVENUE WITH PERFECT FORECASTS ===
+        print("Computing ideal revenue with perfect forecasts...")
+        ideal_total_revenue = []
+        current_soc = 0.5  # Starting SOC
+        
+        for i, day_result in enumerate(results.daily_results):
+            day_start = day_result.date
+            
+            # Get perfect forecasts for this day
+            perfect_da_prices = get_forecast(
+                data=data,
+                current_time=day_start,
+                horizon_hours=24,
+                market="DA",
+                method="perfect"
+            )
+            perfect_rt_prices = get_forecast(
+                data=data,
+                current_time=day_start,
+                horizon_hours=24,
+                market="RT", 
+                method="perfect"
+            )
+            
+            # Run DA scheduler with perfect forecasts
+            perfect_da_schedule = solve_da_schedule(
+                da_price_forecast=perfect_da_prices,
+                rt_price_forecast=perfect_rt_prices,
+                battery=battery,
+                initial_soc=current_soc,
+                end_of_day_soc=0.5
+            )
+            
+            # Calculate perfect revenue for this day using actual prices
+            actual_da_prices_arr = np.array(perfect_da_prices)  # Already perfect
+            actual_rt_prices_arr = np.array(perfect_rt_prices)  # Already perfect
+            
+            perfect_da_bids = perfect_da_schedule.da_energy_bids[:96]  # 96 intervals per day
+            perfect_power = perfect_da_schedule.power_dispatch_schedule[:96]
+            perfect_rt_imbalance = perfect_power - perfect_da_bids
+            
+            # Calculate step-by-step perfect revenues
+            perfect_da_step = np.array([-(actual_da_prices_arr[t] * perfect_da_bids[t] * DELTA_T) for t in range(96)])
+            perfect_rt_step = np.array([-(actual_rt_prices_arr[t] * perfect_rt_imbalance[t] * DELTA_T) for t in range(96)])
+            perfect_total_step = perfect_da_step + perfect_rt_step
+            
+            # Accumulate perfect revenues
+            day_cum_perfect = np.cumsum(perfect_total_step)
+            
+            # Add previous days' totals if not first day
+            if len(ideal_total_revenue) > 0:
+                prev_perfect = ideal_total_revenue[-1]
+                day_cum_perfect += prev_perfect
+            
+            ideal_total_revenue.extend(day_cum_perfect)
+            current_soc = perfect_da_schedule.soc_schedule[-1]  # Update SOC for next day
+        
+        # Plot all revenue curves
+        ax1.plot(all_timestamps, ideal_total_revenue, "gold", linewidth=2,
+                label=f"Ideal (Perfect Forecast): ${ideal_total_revenue[-1]:.2f}")
+        ax1.plot(all_timestamps, actual_total_revenue, "g-", linewidth=2,
+                label=f"Actual (Persistence): ${actual_total_revenue[-1]:.2f}")
+        ax1.plot(all_timestamps, da_only_revenue, "b--", linewidth=1.5,
+                label=f"DA-Only Trading: ${da_only_revenue[-1]:.2f}")
+        
+        # Add day boundaries
+        for day_result in results.daily_results[1:]:
+            ax1.axvline(x=day_result.date, color='gray', linestyle=':', alpha=0.5)
+        
         ax1.set_ylabel("Cumulative Revenue [$]")
-        ax1.legend()
-        ax1.grid(True)
-        ax1.tick_params(axis="x", rotation=45)
+        ax1.legend(fontsize=9)
+        ax1.grid(True, alpha=0.3)
         
-        # 2. Daily Revenue Breakdown
+        # === 2. DAILY REVENUE BREAKDOWN (SIDE-BY-SIDE BARS) ===
         daily_revenues = [day.total_revenue for day in results.daily_results]
         da_revenues = [day.da_revenue for day in results.daily_results]
         rt_revenues = [day.rt_revenue for day in results.daily_results]
         
-        ax2.set_title("Daily Revenue Breakdown")
-        ax2.bar(dates, da_revenues, alpha=0.7, label="DA Revenue", color="blue")
-        ax2.bar(dates, rt_revenues, bottom=da_revenues, alpha=0.7, label="RT Revenue", color="red")
-        ax2.set_ylabel("Daily Revenue [$]")
-        ax2.legend()
-        ax2.grid(True, axis="y")
-        ax2.tick_params(axis="x", rotation=45)
+        ax2.set_title("Daily Revenue Breakdown", fontweight='bold')
         
-        # 3. Final SOC Each Day
+        x_pos = np.arange(n_days)
+        width = 0.35
+        
+        ax2.bar(x_pos - width/2, da_revenues, width, label="DA Revenue", color="blue", alpha=0.7)
+        ax2.bar(x_pos + width/2, rt_revenues, width, label="RT Revenue", color="red", alpha=0.7)
+        
+        ax2.set_ylabel("Daily Revenue [$]")
+        ax2.set_xlabel("Day")
+        ax2.set_xticks(x_pos)
+        ax2.set_xticklabels([d.strftime('%m/%d') for d in dates], rotation=45)
+        ax2.legend()
+        ax2.grid(True, alpha=0.3, axis='y')
+        
+        # === 3. END-OF-DAY SOC ===
         final_socs = [day.final_soc for day in results.daily_results]
-        ax3.set_title("End-of-Day State of Charge")
-        ax3.plot(dates, final_socs, "orange", linewidth=2, marker="s")
+        ax3.set_title("End-of-Day State of Charge", fontweight='bold')
+        ax3.plot(dates, final_socs, "orange", linewidth=2, marker="s", markersize=4)
+        ax3.axhline(y=0.5, color='gray', linestyle=':', alpha=0.7, label='Target (50%)')
         ax3.set_ylabel("Final SOC [0-1]")
         ax3.set_xlabel("Date")
-        ax3.grid(True)
-        ax3.tick_params(axis="x", rotation=45)
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        if n_days > 7:
+            ax3.tick_params(axis="x", rotation=45)
+        
+        # === 4. CONTINUOUS SOC TRAJECTORY ===
+        ax4.set_title("Continuous SOC Trajectory", fontweight='bold')
+        
+        # Build continuous SOC trajectory
+        all_soc_timestamps = []
+        all_soc_values = []
+        
+        for day_result in results.daily_results:
+            day_soc_timestamps = pd.date_range(
+                start=day_result.date,
+                periods=len(day_result.soc_trajectory),
+                freq='15min'
+            )
+            all_soc_timestamps.extend(day_soc_timestamps)
+            all_soc_values.extend(day_result.soc_trajectory)
+        
+        ax4.plot(all_soc_timestamps, all_soc_values, "orange", linewidth=1.5)
+        ax4.axhline(y=0.5, color='gray', linestyle=':', alpha=0.7, label='Target (50%)')
+        
+        # Add day boundaries
+        for day_result in results.daily_results[1:]:
+            ax4.axvline(x=day_result.date, color='gray', linestyle=':', alpha=0.5)
+        
+        ax4.set_ylabel("SOC [0-1]")
+        ax4.set_xlabel("Time")
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+        ax4.set_ylim(0, 1)
+        
+        # Format x-axes for time plots
+        import matplotlib.dates as mdates
+        for ax in [ax1, ax4]:
+            if n_days <= 7:
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+                ax.xaxis.set_major_locator(mdates.HourLocator(interval=12))
+            elif n_days <= 31:
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                ax.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, n_days//10)))
+            else:
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                ax.xaxis.set_major_locator(mdates.WeekdayLocator())
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+        
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+            print(f"Multi-day plot saved to: {os.path.abspath(save_path)}")
+        
+        plt.close()
+        
+    except Exception as e:
+        print(f"Multi-day plotting error: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # 6. POWER DISPATCH OVERVIEW
+        ax6.set_title("Power Dispatch Overview", fontweight='bold')
+        
+        # Calculate daily averages for power dispatch
+        daily_avg_power = []
+        daily_max_charge = []
+        daily_max_discharge = []
+        
+        for day_result in results.daily_results:
+            power = day_result.power_trajectory
+            daily_avg_power.append(np.mean(power))
+            daily_max_charge.append(np.max(power[power > 0]) if np.any(power > 0) else 0)
+            daily_max_discharge.append(np.min(power[power < 0]) if np.any(power < 0) else 0)
+        
+        if n_days <= 31:
+            x_pos = np.arange(n_days)
+            ax6.bar(x_pos, daily_max_charge, alpha=0.7, color='blue', label='Max Charge')
+            ax6.bar(x_pos, daily_max_discharge, alpha=0.7, color='red', label='Max Discharge')
+            ax6.set_xticks(x_pos[::max(1, n_days//10)])
+            ax6.set_xticklabels([dates[i].strftime('%m/%d') for i in range(0, n_days, max(1, n_days//10))],
+                               rotation=45 if n_days > 14 else 0)
+        else:
+            ax6.plot(dates, daily_max_charge, 'b-', alpha=0.7, label='Max Charge')
+            ax6.plot(dates, daily_max_discharge, 'r-', alpha=0.7, label='Max Discharge')
+            ax6.tick_params(axis="x", rotation=45)
+        
+        ax6.axhline(y=0, color='black', linestyle='-', alpha=0.3, linewidth=0.5)
+        ax6.set_ylabel("Power [MW]")
+        ax6.legend()
+        ax6.grid(True, alpha=0.3)
         
         plt.tight_layout()
         

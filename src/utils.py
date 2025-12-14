@@ -119,6 +119,12 @@ class DaySimulationResult:
     soc_trajectory: np.ndarray  # Shape (97,) for 15-min steps
     power_trajectory: np.ndarray  # Shape (96,) [MW]
     final_soc: float  # [0-1]
+    
+    # Detailed revenue breakdowns for plotting (NEW)
+    da_step_revenues: np.ndarray  # DA revenue at each time step
+    rt_step_revenues: np.ndarray  # RT revenue at each time step
+    da_power_bids: np.ndarray     # DA bids for each time step
+    rt_imbalance: np.ndarray      # RT imbalance (actual - DA bids) for each time step
 
 
 @dataclass

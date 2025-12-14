@@ -16,8 +16,8 @@ def main():
     # Run a short simulation (3 days as a test)
     # Note: Start from 2020-01-03 to ensure persistence forecast has previous day's data
     # start_date = pd.Timestamp("2020-01-03")
-    start_date = pd.Timestamp("2025-02-02")
-    n_days = 3
+    start_date = pd.Timestamp("2025-02-15")
+    n_days = 15
 
     print(f"\nRunning {n_days}-day simulation starting {start_date.date()}...")
     results = run_simulation(
@@ -25,7 +25,7 @@ def main():
         start_date=start_date,
         n_days=n_days,
         battery=battery,
-        forecast_method="persistence",
+        forecast_method="perfect",
         horizon_type="receding",
         initial_soc=0.5,
         end_of_day_soc=0.5
@@ -52,7 +52,7 @@ def main():
     # Multi-day overview plot
     end_date = start_date + pd.Timedelta(days=n_days-1)
     multi_day_plot_path = os.path.join(plots_dir, f"multi_day_simulation_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.png")
-    plot_multi_day_simulation(results, save_path=multi_day_plot_path)
+    plot_multi_day_simulation(results, data=data, battery=battery, save_path=multi_day_plot_path)
     
     # Individual day plots
     for i, day_result in enumerate(results.daily_results):
