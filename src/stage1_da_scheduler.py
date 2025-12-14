@@ -15,11 +15,11 @@ def solve_da_schedule(
     initial_soc: float = 0.5,
     rt_dispatches_per_hour: float = 4,
     end_of_day_soc: float = 0.5,
-    cvar_alpha: float = 0.95,
-    cvar_weight: float = 0.5,
+    cvar_alpha: float = 0.90,
+    cvar_weight: float = 0.2,
     rt_dispatch_penalty: float = 0, 
     rt_uncertainty_default: float = 20,
-    n_scenarios: int = 100,
+    n_scenarios: int = 25,
     scenario_seed: Optional[int] = None,
 ) -> DAScheduleResult:
     """
@@ -67,6 +67,10 @@ def solve_da_schedule(
     """
     # Number of time periods
     T = len(rt_price_forecast)
+    da_price_forecast.ffill()
+    rt_price_forecast.ffill()
+    if rt_price_uncertainty is not None:
+        rt_price_uncertainty.ffill()
     
     # Convert prices to numpy arrays
     da_prices = da_price_forecast.values
@@ -270,8 +274,14 @@ def solve_da_schedule(
     # ==================== Solve ====================
     
     solver = SolverFactory('ipopt')
+    solver.options['print_level'] = 5
     solver.options['max_iter'] = 3000
-    results = solver.solve(model, tee=False)
+    solver.options['acceptable_tol'] = 1e-6
+    solver.options['constr_viol_tol'] = 1e-6
+    solver.options['halt_on_ampl_error'] = 'yes'
+    solver.options['max_iter'] = 9000
+    results = solver.solve(model)
+    print(results)
     
     # Check if solution was found
     if results.solver.termination_condition != TerminationCondition.optimal:
@@ -301,6 +311,14 @@ def solve_da_schedule(
     scenario_costs = []
     for s in range(n_scenarios):
         scenario_rt_revenue = -np.sum(rt_price_scenarios[:, s] * rt_energy_bids)
+        if np.any(np.isnan(rt_price_scenarios)):
+            raise ValueError("RT price scenarios contain NaN values")
+        if np.any(np.isinf(rt_price_scenarios)):
+            raise ValueError("RT price scenarios contain infinite values")
+
+        # Optional: clip extreme scenarios
+        rt_price_scenarios = np.clip(rt_price_scenarios, 0, 80)  # Adjust bounds as needed
+
         scenario_profit = da_revenue_val + scenario_rt_revenue - rt_penalty_val
         scenario_profits.append(scenario_profit)
         scenario_costs.append(-scenario_profit)
@@ -335,3 +353,105 @@ def solve_da_schedule(
             "cvar_alpha_used": cvar_alpha,
         }
     )
+
+
+from .forecaster import get_forecasts_for_da
+from .utils import load_ercot_data
+
+
+AMT_DAYS = 2
+
+def main():
+    data = load_ercot_data()
+    current_time = pd.Timestamp("2025-06-02 10:00:00")
+    print(data.head())
+    
+    # 1. Prices for the scheduler (Persistence Forecast)
+    da_prices_forecast, rt_prices_forecast = get_forecasts_for_da(
+        data,
+        current_time=current_time,
+        horizon_hours=24 * AMT_DAYS,
+        method="regression",
+        verbose=False,
+    )
+    
+    # 2. Prices for Real Revenue Calculation (Perfect Forecast / Real Prices)
+    da_prices_real, rt_prices_real = get_forecasts_for_da(
+        data,
+        current_time=current_time,
+        horizon_hours=24 * AMT_DAYS,
+        method="perfect",
+        verbose=False,
+    )
+    
+    # --- CALCULATE PERFECT UNCERTAINTY FORECAST ---
+    # The magnitude of the error between the persistence forecast and the real price
+    # is used as a perfect proxy for the expected uncertainty (std dev).
+    perfect_uncertainty_forecast = (rt_prices_real - rt_prices_forecast).abs()
+    
+    battery = BatteryParams()
+    
+    # --- Define Scenarios for Comparison ---
+    scenarios = {
+        "Baseline (w=0, p=0, Unc=0)": {
+            "cvar_weight": 0,
+            "rt_uncertainty_default": 0,
+            "rt_dispatch_penalty": 0,
+            "rt_price_uncertainty": None, # Use default/float
+            "forecast_input": (da_prices_forecast, rt_prices_forecast),
+            "color": "tab:blue",
+            "linestyle": "-"
+        },
+        "Risk-Averse Regression (w=0.5, Unc=20)": {
+            "cvar_weight": 0.1,
+            "rt_uncertainty_default": 10,
+            "rt_dispatch_penalty": 0,
+            "rt_price_uncertainty": None, # Use default/float
+            "forecast_input": (da_prices_forecast, rt_prices_forecast),
+            "color": "tab:orange",
+            "linestyle": "--"
+        },
+        "Conservative Regression (w=0.1, Unc=20)": {
+            "cvar_weight": 0.1,
+            "rt_uncertainty_default": 5,
+            "rt_dispatch_penalty": 0,
+            "rt_price_uncertainty": None, # Use default/float
+            "forecast_input": (da_prices_forecast, rt_prices_forecast),
+            "color": "tab:green",
+            "linestyle": ":"
+        },
+        "Perfect Uncertainty Regression (w=0.5)": { # NEW SCENARIO
+            "cvar_weight": 0.1, 
+            "rt_uncertainty_default": 0,
+            "rt_dispatch_penalty": 0,
+            "rt_price_uncertainty": perfect_uncertainty_forecast, # <-- Use the Series
+            "forecast_input": (da_prices_forecast, rt_prices_forecast),
+            "color": "tab:purple",
+            "linestyle": "-."
+        },
+    }
+    
+    results_comparison = {}
+    
+    print("Solving DA Schedule for different scenarios...")
+    
+    for name, params in scenarios.items():
+        print(f"  -> Running scenario: {name}")
+        
+        # Determine the price input for the solver
+        da_input, rt_input = params["forecast_input"]
+
+        # Solve DA schedule with specific parameters
+        result = solve_da_schedule(
+            da_price_forecast=da_input,
+            rt_price_forecast=rt_input,
+            battery=battery,
+            cvar_weight=params["cvar_weight"],
+            rt_uncertainty_default=params["rt_uncertainty_default"],
+            rt_dispatch_penalty=params["rt_dispatch_penalty"],
+            rt_price_uncertainty=params["rt_price_uncertainty"],
+        )
+        print(result)
+
+if __name__ == "__main__":
+    main()

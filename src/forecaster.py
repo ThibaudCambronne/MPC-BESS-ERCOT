@@ -4,9 +4,213 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
+import xgboost as xgb 
+from sklearn.preprocessing import StandardScaler # Still useful, but less critical
+from sklearn.pipeline import Pipeline
 
 from src.globals import FREQUENCY, PRICE_NODE, TIME_STEPS_PER_HOUR
 
+from typing import Literal
+
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+# Import the Huber Regressor for robust regression
+from sklearn.linear_model import HuberRegressor, LinearRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
+# Assuming these globals are defined in src.globals
+# from src.globals import FREQUENCY, PRICE_NODE, TIME_STEPS_PER_HOUR
+
+# --- Helper Functions for Enhancements ---
+
+def _encode_cyclical_feature(df: pd.DataFrame, column: str, max_val: int) -> pd.DataFrame:
+    """Encodes a cyclical feature using sine and cosine transformations."""
+    df[f'{column}_sin'] = np.sin(2 * np.pi * df[column] / max_val)
+    df[f'{column}_cos'] = np.cos(2 * np.pi * df[column] / max_val)
+    return df
+
+def get_improved_regression_forecast(
+    data: pd.DataFrame,
+    current_time: pd.Timestamp,
+    horizon_hours: int,
+    market: Literal["DA", "RT"],
+    price_node: str = PRICE_NODE,
+    training_days: int = 15,
+    verbose: bool = False,
+    lag_hours: int = 1, 
+) -> pd.Series:
+    """
+    Generate price forecast using the highly effective, non-linear XGBoost Regressor.
+    
+    This model is much better at capturing non-linear relationships and price spikes.
+    """
+    # --- (Feature setup for price_col, required_cols, etc. remains the same) ---
+    if market == "DA":
+        price_col = f"{price_node}_DAM"
+    elif market == "RT":
+        price_col = price_node
+    else:
+        raise ValueError(f"Unknown market: {market}")
+        
+    if price_col not in data.columns:
+        raise ValueError(f"Price column '{price_col}' not found in data.")
+    
+    required_cols = ['dew_point_temperature_S', price_col]
+    if not all(col in data.columns for col in required_cols):
+        raise ValueError(f"Missing required columns in data: {', '.join([c for c in required_cols if c not in data.columns])}")
+
+    # Ensure data is indexed by datetime and sorted
+    if not data.index.is_monotonic_increasing:
+        data = data.sort_index()
+        
+    # Forward fill missing values
+    data = data.ffill()
+    
+    # Define training period
+    training_start = current_time - pd.Timedelta(days=training_days)
+    training_end = current_time
+    
+    # Extract historical data
+    historical_data = data.loc[:current_time].copy()
+    
+    # Create the lagged price feature
+    lag_steps = lag_hours * TIME_STEPS_PER_HOUR
+    historical_data['lagged_price'] = historical_data[price_col].shift(lag_steps)
+
+    # Add time features
+    historical_data['hour'] = historical_data.index.hour
+    historical_data['day_of_week'] = historical_data.index.dayofweek
+    
+    # Apply cyclical encoding (Still useful for tree-based models, but less critical)
+    historical_data = _encode_cyclical_feature(historical_data, 'hour', 24)
+    historical_data = _encode_cyclical_feature(historical_data, 'day_of_week', 7)
+    
+    # Extract training data
+    training_mask = (historical_data.index >= training_start) & (historical_data.index < training_end)
+    training_data = historical_data.loc[training_mask].copy()
+
+    feature_cols = [
+        'hour_sin', 'hour_cos',
+        'day_of_week_sin', 'day_of_week_cos',
+        'dew_point_temperature_S',
+        'lagged_price'
+    ]
+    
+    X_train = training_data[feature_cols].values
+    y_train = training_data[price_col].values
+    
+    # Remove rows with NaN values
+    valid_mask = ~np.isnan(X_train).any(axis=1) & ~np.isnan(y_train)
+    X_train = X_train[valid_mask]
+    y_train = y_train[valid_mask]
+    
+    if len(X_train) == 0:
+        raise ValueError("No valid training data after feature engineering and NaN removal.")
+
+    # --- Step 2: Model Training (XGBoost Regressor) ---
+    
+    # Initialize XGBoost Regressor
+    # objective='reg:squarederror' is the default for regression.
+    # n_estimators, max_depth, learning_rate are good starting hyperparams.
+    # The 'gbtree' booster is excellent for non-linear prediction.
+    model = xgb.XGBRegressor(
+        objective='reg:squarederror',
+        n_estimators=100, 
+        max_depth=5, 
+        learning_rate=0.1,
+        random_state=42,
+        tree_method='hist' # Faster training
+    )
+    
+    # Fit the model
+    model.fit(X_train, y_train)
+
+    # --- Step 3: Generating Forecasts (Iterative Prediction for Lagged Feature) ---
+    
+    forecast_index = pd.date_range(
+        start=current_time,
+        periods=horizon_hours * TIME_STEPS_PER_HOUR,
+        freq=FREQUENCY,
+    )
+    
+    forecast_values = []
+    
+    # The prices needed for the lag feature: last 'lag_steps' known historical prices.
+    lag_steps_needed = lag_hours * TIME_STEPS_PER_HOUR
+    price_tracker_hist = historical_data.loc[historical_data.index < current_time, price_col].iloc[-lag_steps_needed:].tolist()
+    
+    # Combine history and the new predictions to form the rolling lag feature
+    price_tracker = price_tracker_hist
+    
+    for i, timestamp in enumerate(forecast_index):
+        
+        # 1. Prepare exogenous features (time, weather)
+        temp_df = pd.DataFrame([{'hour': timestamp.hour, 'day_of_week': timestamp.dayofweek}], index=[timestamp])
+        temp_df = _encode_cyclical_feature(temp_df, 'hour', 24)
+        temp_df = _encode_cyclical_feature(temp_df, 'day_of_week', 7)
+
+        # Get dew point (using last known if future is unavailable)
+        dew_point = data.loc[timestamp, 'dew_point_temperature_S'] if timestamp in data.index else data['dew_point_temperature_S'].iloc[-1]
+        
+        # 2. Determine the lagged price feature (Crucial for iterative forecasting)
+        # The required lagged price is located at index 'i' of the price_tracker
+        # Note: This is simplified and assumes a perfect match between time steps.
+        try:
+            lagged_price = price_tracker[i]
+        except IndexError:
+            # Should not happen if history is set correctly, but as a fallback
+            lagged_price = price_tracker[-1] 
+                
+        # 3. Create the feature vector for prediction
+        X_i = np.array([
+            temp_df['hour_sin'].iloc[0], temp_df['hour_cos'].iloc[0],
+            temp_df['day_of_week_sin'].iloc[0], temp_df['day_of_week_cos'].iloc[0],
+            dew_point,
+            lagged_price
+        ]).reshape(1, -1)
+        
+        # 4. Predict the price
+        predicted_price = model.predict(X_i)[0]
+        forecast_values.append(predicted_price)
+        
+        # 5. Update the price_tracker with the new predicted price for future lags
+        price_tracker.append(predicted_price)
+
+    # --- (Final Series Creation and Plotting logic remains the same) ---
+    forecast = pd.Series(
+        forecast_values,
+        index=forecast_index,
+        name=f"{market}_xgboost_regression_forecast"
+    )
+
+    if verbose:
+        # Historical window for plotting
+        hist_start = current_time - pd.Timedelta(hours=horizon_hours)
+        historical = data.loc[
+            (data.index >= hist_start) & (data.index <= current_time), price_col
+        ]
+        
+        # Plot
+        plt.figure(figsize=(12, 6))
+        plt.plot(
+            historical.index, historical.values, label="Historical", color="tab:blue"
+        )
+        plt.plot(forecast.index, forecast.values, label="XGBoost Forecast", color="tab:red")
+        plt.axvline(current_time, color="k", linestyle="--", label="Current Time")
+        plt.xlabel("Time")
+        plt.ylabel("Price ($/MWh)")
+        plt.title(f"{market} Price Forecast - XGBoost Regression\n(Trained on {training_days} days)")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+
+    return forecast
+
+# --- Update the original function to use the improved one ---
+# This block replaces the old logic in your original file
 
 def get_forecast(
     data: pd.DataFrame,
@@ -79,7 +283,7 @@ def get_forecast(
         if not data.index.is_monotonic_increasing:
             data = data.sort_index()
         # Get the prices for the forecast window
-        forecast = get_regression_forecast(
+        forecast = get_improved_regression_forecast(
             data=data,
             current_time=current_time,
             horizon_hours=horizon_hours,
@@ -171,7 +375,7 @@ def get_regression_forecast(
         raise ValueError("Column 'dew_point_temperature_S' not found in data.")
     
     # Just forward fill dataframe 
-    data = data.fillna(method='ffill')
+    data = data.ffill()
 
     # Define training period: last 'training_days' days before current_time
     training_start = current_time - pd.Timedelta(days=training_days)

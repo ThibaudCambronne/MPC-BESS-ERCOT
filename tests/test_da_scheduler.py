@@ -8,10 +8,10 @@ from src.stage1_da_scheduler import solve_da_schedule
 from src.utils import load_ercot_data
 
 
-AMT_DAYS = 3
+AMT_DAYS = 2
 def test_da_scheduler():
     data = load_ercot_data()
-    current_time = pd.Timestamp("2025-02-10 10:00:00")
+    current_time = pd.Timestamp("2025-04-25 10:00:00")
     print(data.head())
     
     # 1. Prices for the scheduler (Persistence Forecast)
@@ -94,15 +94,15 @@ def test_da_scheduler():
             "color": "tab:red",
             "linestyle": "-."
         },
-        "Perfect Prediction (w=0, p=0)": { 
-            "cvar_weight": 0,
-            "rt_uncertainty_default": 0,
-            "rt_dispatch_penalty": 0,
-            "rt_price_uncertainty": None,
-            "forecast_input": (da_prices_real, rt_prices_real), # Use Real Prices as input
-            "color": "black",
-            "linestyle": "-"
-        },
+        # "Perfect Prediction (w=0, p=0)": { 
+        #     "cvar_weight": 0,
+        #     "rt_uncertainty_default": 0,
+        #     "rt_dispatch_penalty": 0,
+        #     "rt_price_uncertainty": None,
+        #     "forecast_input": (da_prices_real, rt_prices_real), # Use Real Prices as input
+        #     "color": "black",
+        #     "linestyle": "-"
+        # },
     }
     
     results_comparison = {}
