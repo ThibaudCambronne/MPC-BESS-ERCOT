@@ -11,7 +11,7 @@ from src.utils import load_ercot_data
 AMT_DAYS = 2
 def test_da_scheduler():
     data = load_ercot_data()
-    current_time = pd.Timestamp("2025-04-25 10:00:00")
+    current_time = pd.Timestamp("2025-02-01 10:00:00")
     print(data.head())
     
     # 1. Prices for the scheduler (Persistence Forecast)

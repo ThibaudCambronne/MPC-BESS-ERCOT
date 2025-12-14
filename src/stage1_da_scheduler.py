@@ -19,7 +19,7 @@ def solve_da_schedule(
     cvar_weight: float = 0.2,
     rt_dispatch_penalty: float = 0, 
     rt_uncertainty_default: float = 20,
-    n_scenarios: int = 25,
+    n_scenarios: int = 50,
     scenario_seed: Optional[int] = None,
 ) -> DAScheduleResult:
     """
@@ -92,7 +92,8 @@ def solve_da_schedule(
         scale=rt_uncertainty[:, np.newaxis],
         size=(T, n_scenarios)
     )
-    
+        # Optional: clip extreme scenarios
+    rt_price_scenarios = np.clip(rt_price_scenarios, 0, 80)  # Adjust bounds as needed
     # Handle regulation prices
     if reg_up_price is not None:
         reg_up_prices = reg_up_price.values
@@ -316,8 +317,6 @@ def solve_da_schedule(
         if np.any(np.isinf(rt_price_scenarios)):
             raise ValueError("RT price scenarios contain infinite values")
 
-        # Optional: clip extreme scenarios
-        rt_price_scenarios = np.clip(rt_price_scenarios, 0, 80)  # Adjust bounds as needed
 
         scenario_profit = da_revenue_val + scenario_rt_revenue - rt_penalty_val
         scenario_profits.append(scenario_profit)
