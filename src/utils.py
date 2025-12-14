@@ -96,6 +96,8 @@ class DAScheduleResult:
     reg_down_capacity: np.ndarray   # Shape (288,) [MW]
     expected_revenue: float         # [$]
     diagnostic_information: Optional[dict] # stuff I need for debugging
+    da_price_forecast: Optional[np.ndarray] = None  # Forecast prices used (for plotting)
+    rt_price_forecast: Optional[np.ndarray] = None  # Forecast prices used (for plotting)
 
 @dataclass
 class RTMPCResult:
@@ -117,6 +119,12 @@ class DaySimulationResult:
     soc_trajectory: np.ndarray  # Shape (97,) for 15-min steps
     power_trajectory: np.ndarray  # Shape (96,) [MW]
     final_soc: float  # [0-1]
+    
+    # Detailed revenue breakdowns for plotting (NEW)
+    da_step_revenues: np.ndarray  # DA revenue at each time step
+    rt_step_revenues: np.ndarray  # RT revenue at each time step
+    da_power_bids: np.ndarray     # DA bids for each time step
+    rt_imbalance: np.ndarray      # RT imbalance (actual - DA bids) for each time step
 
 
 @dataclass
@@ -126,3 +134,4 @@ class SimulationResult:
     daily_results: List[DaySimulationResult]
     cumulative_revenue: np.ndarray  # Shape (n_days,)
     total_revenue: float  # [$]
+    da_schedules: dict  # Maps pd.Timestamp -> DAScheduleResult
