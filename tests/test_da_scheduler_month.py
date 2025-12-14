@@ -12,7 +12,7 @@ from src.utils import load_ercot_data
 # --- Configuration ---
 AMT_DAYS = 2             
 TOTAL_DAYS = 28          
-START_DATE = "2025-03-01 10:00:00"
+START_DATE = "2025-06-01 10:00:00"
 
 def test_monthly_da_scheduler_comparison():
     """
