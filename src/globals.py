@@ -10,6 +10,6 @@ DELTA_T = 0.25  # Time step in hours (15 minutes)
 TIME_STEPS_PER_HOUR = int(1 / DELTA_T)
 FREQUENCY = f"{60 // TIME_STEPS_PER_HOUR}min"
 
-MPC_BATTERY_EPSILON = 1e-6 # Battery capacity in MWh
+MPC_BATTERY_EPSILON = 1e-6  # Battery capacity in MWh
 
 PRICE_NODE = "HB_SOUTH"  # Price node to use for forecasts and optimization

@@ -29,22 +29,23 @@ def load_ercot_data() -> pd.DataFrame:
     """
     # Define the core columns needed for both price and regression features
     DAM_COLUMNS = ["key", f"{PRICE_NODE}_DAM", "dew_point_temperature_S"]
-    RTM_COLUMNS = ["hour_timestamp", PRICE_NODE] # RTM data does not typically have weather features repeated
+    RTM_COLUMNS = [
+        "hour_timestamp",
+        PRICE_NODE,
+    ]  # RTM data does not typically have weather features repeated
 
     # ====================
     # Load DAM data
     # NOTE: Including "dew_point_temperature_S" column
     try:
-        df_dam_train = pd.read_csv(
-            DATA_PATH_DAM_TRAINING, usecols=DAM_COLUMNS
-        )
-        df_dam_test = pd.read_csv(
-            DATA_PATH_DAM_TESTING, usecols=DAM_COLUMNS
-        )
+        df_dam_train = pd.read_csv(DATA_PATH_DAM_TRAINING, usecols=DAM_COLUMNS)
+        df_dam_test = pd.read_csv(DATA_PATH_DAM_TESTING, usecols=DAM_COLUMNS)
     except ValueError as e:
         # Handle case where the new column might be missing from the files
         print(f"Error loading DAM data with required columns: {e}")
-        print(f"Ensure that 'dew_point_temperature_S' is present in {DATA_PATH_DAM_TRAINING} and {DATA_PATH_DAM_TESTING}.")
+        print(
+            f"Ensure that 'dew_point_temperature_S' is present in {DATA_PATH_DAM_TRAINING} and {DATA_PATH_DAM_TESTING}."
+        )
         raise
 
     df_dam = pd.concat([df_dam_train, df_dam_test], ignore_index=True)
@@ -68,7 +69,7 @@ def load_ercot_data() -> pd.DataFrame:
     # ====================
     # Load RTM data
     df_rtm = pd.read_csv(DATA_PATH_RTM, usecols=RTM_COLUMNS)
-    
+
     df_rtm[f"{PRICE_NODE}_RTM"] = df_rtm[PRICE_NODE]
     df_rtm["key"] = df_rtm["hour_timestamp"]
 
@@ -93,10 +94,12 @@ def load_ercot_data() -> pd.DataFrame:
     hours_per_day_rtm = 24 * 4
     full_days_rtm = group_sizes[group_sizes == hours_per_day_rtm].index
     df_all = df_all[df_all["date_str"].isin(full_days_rtm)].drop(columns=["date_str"])
-    
+
     # Final check to ensure the required column is present
     if "dew_point_temperature_S" not in df_all.columns:
-        raise RuntimeError("The column 'dew_point_temperature_S' is missing after data loading and merging. Please check your source files.")
+        raise RuntimeError(
+            "The column 'dew_point_temperature_S' is missing after data loading and merging. Please check your source files."
+        )
 
     return df_all
 
@@ -110,13 +113,18 @@ class DAScheduleResult:
     da_energy_bids: np.ndarray  # Shape (24,) [MW]
     rt_energy_bids: np.ndarray  # Shape (288,) [MW]
     power_dispatch_schedule: np.ndarray  # Shape (288,) [MW]
-    soc_schedule: np.ndarray        # Shape (289,) [0-1]
-    reg_up_capacity: np.ndarray     # Shape (288,) [MW]
-    reg_down_capacity: np.ndarray   # Shape (288,) [MW]
-    expected_revenue: float         # [$]
-    diagnostic_information: Optional[dict] # stuff I need for debugging
-    da_price_forecast: Optional[np.ndarray] = None  # Forecast prices used (for plotting)
-    rt_price_forecast: Optional[np.ndarray] = None  # Forecast prices used (for plotting)
+    soc_schedule: np.ndarray  # Shape (289,) [0-1]
+    reg_up_capacity: np.ndarray  # Shape (288,) [MW]
+    reg_down_capacity: np.ndarray  # Shape (288,) [MW]
+    expected_revenue: float  # [$]
+    diagnostic_information: Optional[dict]  # stuff I need for debugging
+    da_price_forecast: Optional[np.ndarray] = (
+        None  # Forecast prices used (for plotting)
+    )
+    rt_price_forecast: Optional[np.ndarray] = (
+        None  # Forecast prices used (for plotting)
+    )
+
 
 @dataclass
 class RTMPCResult:
@@ -138,12 +146,12 @@ class DaySimulationResult:
     soc_trajectory: np.ndarray  # Shape (97,) for 15-min steps
     power_trajectory: np.ndarray  # Shape (96,) [MW]
     final_soc: float  # [0-1]
-    
+
     # Detailed revenue breakdowns for plotting (NEW)
     da_step_revenues: np.ndarray  # DA revenue at each time step
     rt_step_revenues: np.ndarray  # RT revenue at each time step
-    da_power_bids: np.ndarray     # DA bids for each time step
-    rt_imbalance: np.ndarray      # RT imbalance (actual - DA bids) for each time step
+    da_power_bids: np.ndarray  # DA bids for each time step
+    rt_imbalance: np.ndarray  # RT imbalance (actual - DA bids) for each time step
 
 
 @dataclass
