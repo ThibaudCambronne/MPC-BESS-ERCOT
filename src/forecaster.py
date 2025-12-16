@@ -70,12 +70,16 @@ def _prepare_training_data(
 
     historical_data = data.loc[:current_time].copy()
 
-    # Create the lagged price feature
+    # Create the lagged price features
     lag_cols = []
+    lagged_data = []
     for lag in range(1, number_of_lags + 1):
         lag_col_name = f"lagged_price_{lag}"
         lag_cols.append(lag_col_name)
-        historical_data[lag_col_name] = historical_data[price_col].shift(lag)
+        lagged_data.append(historical_data[price_col].shift(lag).rename(lag_col_name))
+
+    # Concatenate all lagged columns at once
+    historical_data = pd.concat([historical_data] + lagged_data, axis=1)
 
     training_data = historical_data.loc[
         (historical_data.index >= training_start)
@@ -86,7 +90,6 @@ def _prepare_training_data(
     training_data, time_features_cols = _add_cyclical_time_features(training_data)
 
     if verbose:
-        # Plot lagged features
         fig, ax = plt.subplots(figsize=(10, 4))
         for time_feature in time_features_cols:
             ax.plot(
@@ -393,7 +396,7 @@ def get_forecasts_for_da(
     data: pd.DataFrame,
     current_time: pd.Timestamp,
     horizon_hours: int,
-    method: Literal["persistence", "perfect", "regression"],
+    method: Literal["persistence", "perfect", "xgboost", "regression"],
     price_node: str = PRICE_NODE,
     verbose: bool = False,
 ) -> tuple[pd.Series, pd.Series]:

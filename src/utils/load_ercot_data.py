@@ -11,7 +11,7 @@ from src.globals import (
 )
 
 
-def load_ercot_data(verbose: bool = True) -> pd.DataFrame:
+def load_ercot_data(verbose: bool = False) -> pd.DataFrame:
     """
     Load ERCOT price and ancillary services data from a CSV file,
     including all WEATHER_FEATURES for the regression forecast method.
@@ -103,7 +103,9 @@ def load_ercot_data(verbose: bool = True) -> pd.DataFrame:
         df_all["date_str"].isin(full_days_rtm) & df_all["date_str"].isin(full_days_dam)
     ].drop(columns=["date_str"])
 
-    columns_to_interpolate = WEATHER_FEATURES
+    # ====================
+    # Interpolate missing values
+    columns_to_interpolate = df_all.columns  # WEATHER_FEATURES
 
     df_missing = pd.DataFrame()
     if verbose:
@@ -117,32 +119,51 @@ def load_ercot_data(verbose: bool = True) -> pd.DataFrame:
         plot_start = pd.Timestamp("2025-01-15 00:00:00")
         plot_end = pd.Timestamp("2025-01-20 23:45:00")
         plot_data = df_all.loc[plot_start:plot_end].copy()
-        fig, axs = plt.subplots(1, len(columns_to_interpolate), figsize=(10, 4))
-        if len(columns_to_interpolate) == 1:
-            axs = [axs]
+
+        # Calculate the number of rows needed for a maximum of 2 columns
+        num_columns = min(2, len(columns_to_interpolate))
+        num_rows = (len(columns_to_interpolate) + num_columns - 1) // num_columns
+
+        fig, axs = plt.subplots(
+            num_rows, num_columns, figsize=(6 * num_columns, 4 * num_rows)
+        )
+        plt.subplots_adjust(hspace=0.4, wspace=0.2)
+        axs = axs.flatten() if num_rows > 1 else axs
         for i, col in enumerate(columns_to_interpolate):
             max_val = plot_data[col].max()
             min_val = plot_data[col].min()
 
-            axs[i].bar(
-                plot_data.index,
-                np.where(df_missing.loc[plot_data.index, col] == 1, max_val, 0),
-                width=0.01,
-                color="red",
-                alpha=0.3,
-                label="Missing Data",
-            )
-            axs[i].bar(
-                plot_data.index,
-                np.where(df_missing.loc[plot_data.index, col] == 1, min_val, 0),
-                width=0.01,
-                color="red",
-                alpha=0.3,
-            )
+            missing_plot_data = df_missing.loc[plot_data.index, col]
+            if missing_plot_data.empty:
+                continue
+
+            bars_params = {
+                "width": 0.01,
+                "color": "red",
+                "alpha": 0.3,
+            }
+            if max_val > 0:
+                axs[i].bar(
+                    plot_data.index,
+                    np.where(missing_plot_data == 1, max_val, 0),
+                    label="Missing Data",
+                    **bars_params,
+                )
+            if min_val < 0:
+                axs[i].bar(
+                    plot_data.index,
+                    np.where(missing_plot_data == 1, min_val, 0),
+                    **bars_params,
+                )
 
             axs[i].plot(plot_data.index, plot_data[col], label=col)
-            axs[i].set_title("Interpolated Features")
+            axs[i].set_title(
+                f"Interpolated Features: {df_missing[col].sum():,} / {df_missing[col].shape[0]:,} missing values"
+            )
+            axs[i].set_ylabel(col)
             axs[i].set_xlabel("Time")
+            for tick in axs[i].get_xticklabels():
+                tick.set_rotation(15)
         fig.legend()
         fig.show()
 

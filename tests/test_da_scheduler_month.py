@@ -3,7 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pytest
+from tqdm import tqdm
 
 from src.battery_model import BatteryParams
 from src.forecaster import get_forecasts_for_da
@@ -12,8 +12,8 @@ from src.utils.load_ercot_data import load_ercot_data
 
 # --- Configuration ---
 AMT_DAYS = 2
-TOTAL_DAYS = 28
-START_DATE = "2025-06-01 10:00:00"
+TOTAL_DAYS = 300
+START_DATE = "2024-06-01 10:00:00"
 
 
 def test_monthly_da_scheduler_comparison():
@@ -23,60 +23,72 @@ def test_monthly_da_scheduler_comparison():
     """
 
     # 1. Load Data
-    try:
-        data = load_ercot_data()
-    except FileNotFoundError:
-        pytest.skip("ERCOT data file not found. Skipping integration test.")
+    data = load_ercot_data()
 
     print(f"Data Loaded. Range: {data.index.min()} to {data.index.max()}")
 
-    # Initialize storage
-    scenario_results_store = {}
-
     scenarios_config = {
-        "Baseline (w=0, p=0, Unc=0)": {
+        "Baseline xgboost (w=0, p=0, Unc=0)": {
             "cvar_weight": 0,
             "rt_uncertainty_default": 0,
             "rt_dispatch_penalty": 0,
-            "color": "tab:blue",
+            "color": "#2259f1",
             "linestyle": "-",
-            "type": "regression",
+            "type": "xgboost",
         },
-        "Risk-Averse Regression (w=0.5, Unc=20)": {
+        "Risk-Averse xgboost (w=0.5, Unc=20)": {
             "cvar_weight": 0.5,
             "rt_uncertainty_default": 20,
             "rt_dispatch_penalty": 0,
-            "color": "tab:orange",
-            "linestyle": "--",
-            "type": "regression",
+            "color": "#89AAC9",
+            "linestyle": ":",
+            "type": "xgboost",
         },
-        "Conservative Regression (w=0.1, Unc=20)": {
+        "Conservative xgboost (w=0.1, Unc=20)": {
             "cvar_weight": 0.1,
             "rt_uncertainty_default": 20,
             "rt_dispatch_penalty": 0,
-            "color": "tab:green",
+            "color": "#0a2980",
             "linestyle": ":",
-            "type": "regression",
+            "type": "xgboost",
         },
-        "Perfect Uncertainty Regression (w=0.5)": {
+        "Perfect Uncertainty xgboost (w=0.1)": {
             "cvar_weight": 0.1,
             "rt_uncertainty_default": 0,
             "rt_dispatch_penalty": 0,
             "use_perfect_uncertainty": True,
-            "color": "tab:purple",
-            "linestyle": "-.",
-            "type": "regression",
+            "color": "#47c6e6",
+            "linestyle": ":",
+            "type": "xgboost",
         },
-        "Persistence (w=0.5)": {
-            "cvar_weight": 0.1,
+        "Baseline Persistence (w=0, p=0, Unc=0)": {
+            "cvar_weight": 0,
             "rt_uncertainty_default": 0,
             "rt_dispatch_penalty": 0,
             "color": "tab:red",
-            "linestyle": "-.",
+            "linestyle": "-",
             "type": "persistence",
         },
+        "Baseline Regression (w=0, p=0, Unc=0)": {
+            "cvar_weight": 0,
+            "rt_uncertainty_default": 0,
+            "rt_dispatch_penalty": 0,
+            "color": "tab:green",
+            "linestyle": "-",
+            "type": "regression",
+        },
+        # "Perfect Forecast": {
+        #     "cvar_weight": 0,
+        #     "rt_uncertainty_default": 0,
+        #     "rt_dispatch_penalty": 0,
+        #     "color": "tab:brown",
+        #     "linestyle": "-",
+        #     "type": "perfect",
+        # },
     }
 
+    # Initialize storage
+    scenario_results_store = {}
     for name in scenarios_config:
         scenario_results_store[name] = []
 
@@ -86,11 +98,17 @@ def test_monthly_da_scheduler_comparison():
 
     battery = BatteryParams()
 
-    for i in range(num_iterations):
+    for i in tqdm(range(num_iterations), desc="Processing Time Blocks"):
         current_time = start_timestamp + pd.Timedelta(days=i * AMT_DAYS)
-        print(f"Processing Block {i + 1}/{num_iterations}: {current_time}")
 
         # 1. Generate Forecasts
+        da_fc_xgb, rt_fc_xgb = get_forecasts_for_da(
+            data,
+            current_time=current_time,
+            horizon_hours=24 * AMT_DAYS,
+            method="xgboost",
+            verbose=False,
+        )
         da_fc_reg, rt_fc_reg = get_forecasts_for_da(
             data,
             current_time=current_time,
@@ -113,19 +131,22 @@ def test_monthly_da_scheduler_comparison():
             verbose=False,
         )
 
-        # 2. Calculate Perfect Uncertainty
-        perfect_unc_series = (rt_real - rt_fc_reg).abs()
-
         # 3. Run Scenarios
         for name, params in scenarios_config.items():
-            if params["type"] == "persistence":
+            if params["type"] == "xgboost":
+                da_input, rt_input = da_fc_xgb, rt_fc_xgb
+            elif params["type"] == "persistence":
                 da_input, rt_input = da_fc_pers, rt_fc_pers
-            else:
+            elif params["type"] == "perfect":
+                da_input, rt_input = da_real, rt_real
+            elif params["type"] == "regression":
                 da_input, rt_input = da_fc_reg, rt_fc_reg
+            else:
+                raise ValueError(f"Unknown forecast type in scenario {name}")
 
             unc_input = None
             if params.get("use_perfect_uncertainty"):
-                unc_input = perfect_unc_series
+                unc_input = (rt_real - rt_input).abs()
 
             for i in range(2):
                 try:
@@ -211,3 +232,7 @@ def test_monthly_da_scheduler_comparison():
     # We generally don't use plt.show() in automated tests, but we print the path
     print(f"\nPlot saved to {output_filename}")
     plt.close()
+
+
+if __name__ == "__main__":
+    test_monthly_da_scheduler_comparison()

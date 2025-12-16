@@ -24,6 +24,7 @@ def solve_da_schedule(
     rt_uncertainty_default: float = 20,
     n_scenarios: int = 50,
     scenario_seed: Optional[int] = None,
+    verbose: bool = False,
 ) -> DAScheduleResult:
     """
     Solve Stage 1 DA optimization problem with CVaR risk measure using Pyomo.
@@ -304,7 +305,8 @@ def solve_da_schedule(
     solver.options["halt_on_ampl_error"] = "yes"
     solver.options["max_iter"] = 9000
     results = solver.solve(model)
-    print(results)
+    if verbose:
+        print(results)
 
     # Check if solution was found
     if results.solver.termination_condition != TerminationCondition.optimal:
@@ -384,104 +386,7 @@ def solve_da_schedule(
     )
 
 
-from .forecaster import get_forecasts_for_da
-from .utils.load_ercot_data import load_ercot_data
-
-AMT_DAYS = 2
-
-
-def main():
-    data = load_ercot_data()
-    current_time = pd.Timestamp("2025-06-02 10:00:00")
-    print(data.head())
-
-    # 1. Prices for the scheduler (Persistence Forecast)
-    da_prices_forecast, rt_prices_forecast = get_forecasts_for_da(
-        data,
-        current_time=current_time,
-        horizon_hours=24 * AMT_DAYS,
-        method="regression",
-        verbose=False,
-    )
-
-    # 2. Prices for Real Revenue Calculation (Perfect Forecast / Real Prices)
-    da_prices_real, rt_prices_real = get_forecasts_for_da(
-        data,
-        current_time=current_time,
-        horizon_hours=24 * AMT_DAYS,
-        method="perfect",
-        verbose=False,
-    )
-
-    # --- CALCULATE PERFECT UNCERTAINTY FORECAST ---
-    # The magnitude of the error between the persistence forecast and the real price
-    # is used as a perfect proxy for the expected uncertainty (std dev).
-    perfect_uncertainty_forecast = (rt_prices_real - rt_prices_forecast).abs()
-
-    battery = BatteryParams()
-
-    # --- Define Scenarios for Comparison ---
-    scenarios = {
-        "Baseline (w=0, p=0, Unc=0)": {
-            "cvar_weight": 0,
-            "rt_uncertainty_default": 0,
-            "rt_dispatch_penalty": 0,
-            "rt_price_uncertainty": None,  # Use default/float
-            "forecast_input": (da_prices_forecast, rt_prices_forecast),
-            "color": "tab:blue",
-            "linestyle": "-",
-        },
-        "Risk-Averse Regression (w=0.5, Unc=20)": {
-            "cvar_weight": 0.1,
-            "rt_uncertainty_default": 10,
-            "rt_dispatch_penalty": 0,
-            "rt_price_uncertainty": None,  # Use default/float
-            "forecast_input": (da_prices_forecast, rt_prices_forecast),
-            "color": "tab:orange",
-            "linestyle": "--",
-        },
-        "Conservative Regression (w=0.1, Unc=20)": {
-            "cvar_weight": 0.1,
-            "rt_uncertainty_default": 5,
-            "rt_dispatch_penalty": 0,
-            "rt_price_uncertainty": None,  # Use default/float
-            "forecast_input": (da_prices_forecast, rt_prices_forecast),
-            "color": "tab:green",
-            "linestyle": ":",
-        },
-        "Perfect Uncertainty Regression (w=0.5)": {  # NEW SCENARIO
-            "cvar_weight": 0.1,
-            "rt_uncertainty_default": 0,
-            "rt_dispatch_penalty": 0,
-            "rt_price_uncertainty": perfect_uncertainty_forecast,  # <-- Use the Series
-            "forecast_input": (da_prices_forecast, rt_prices_forecast),
-            "color": "tab:purple",
-            "linestyle": "-.",
-        },
-    }
-
-    results_comparison = {}
-
-    print("Solving DA Schedule for different scenarios...")
-
-    for name, params in scenarios.items():
-        print(f"  -> Running scenario: {name}")
-
-        # Determine the price input for the solver
-        da_input, rt_input = params["forecast_input"]
-
-        # Solve DA schedule with specific parameters
-        result = solve_da_schedule(
-            da_price_forecast=da_input,
-            rt_price_forecast=rt_input,
-            battery=battery,
-            cvar_weight=params["cvar_weight"],
-            rt_uncertainty_default=params["rt_uncertainty_default"],
-            rt_dispatch_penalty=params["rt_dispatch_penalty"],
-            rt_price_uncertainty=params["rt_price_uncertainty"],
-        )
-        print(result)
-
+from tests.test_da_scheduler_month import test_monthly_da_scheduler_comparison
 
 if __name__ == "__main__":
-    main()
+    test_monthly_da_scheduler_comparison()
