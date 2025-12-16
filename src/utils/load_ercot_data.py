@@ -1,7 +1,3 @@
-from dataclasses import dataclass
-from typing import List, Optional
-
-import numpy as np
 import pandas as pd
 
 from src.globals import (
@@ -32,7 +28,7 @@ def load_ercot_data() -> pd.DataFrame:
     RTM_COLUMNS = [
         "hour_timestamp",
         PRICE_NODE,
-    ]  # RTM data does not typically have weather features repeated
+    ]  # No need to get the weather data again from RTM file
 
     # ====================
     # Load DAM data
@@ -70,11 +66,12 @@ def load_ercot_data() -> pd.DataFrame:
     # Load RTM data
     df_rtm = pd.read_csv(DATA_PATH_RTM, usecols=RTM_COLUMNS)
 
-    df_rtm[f"{PRICE_NODE}_RTM"] = df_rtm[PRICE_NODE]
-    df_rtm["key"] = df_rtm["hour_timestamp"]
+    df_rtm = df_rtm.rename(
+        columns={PRICE_NODE: f"{PRICE_NODE}_RTM", "hour_timestamp": "key"}
+    )
 
     df_rtm["key"] = pd.to_datetime(df_rtm["key"])
-    df_rtm["hour_timestamp"] = pd.to_datetime(df_rtm["hour_timestamp"])
+
     # The key are missing the minutes (the data has for instance 4 values for 00:00 instead of 00:00, 00:15, 00:30, 00:45)
     # We fix that here by adding the minutes based on the occurrence within each hour
     df_rtm["minute"] = df_rtm.groupby(df_rtm["key"]).cumcount() * 15
@@ -102,63 +99,3 @@ def load_ercot_data() -> pd.DataFrame:
         )
 
     return df_all
-
-
-# The dataclasses below were not modified as they are not relevant to the data loading logic.
-@dataclass
-class DAScheduleResult:
-    """Results from Stage 1 DA optimization.
-    CHANGED!"""
-
-    da_energy_bids: np.ndarray  # Shape (24,) [MW]
-    rt_energy_bids: np.ndarray  # Shape (288,) [MW]
-    power_dispatch_schedule: np.ndarray  # Shape (288,) [MW]
-    soc_schedule: np.ndarray  # Shape (289,) [0-1]
-    reg_up_capacity: np.ndarray  # Shape (288,) [MW]
-    reg_down_capacity: np.ndarray  # Shape (288,) [MW]
-    expected_revenue: float  # [$]
-    diagnostic_information: Optional[dict]  # stuff I need for debugging
-    da_price_forecast: Optional[np.ndarray] = (
-        None  # Forecast prices used (for plotting)
-    )
-    rt_price_forecast: Optional[np.ndarray] = (
-        None  # Forecast prices used (for plotting)
-    )
-
-
-@dataclass
-class RTMPCResult:
-    """Results from Stage 2 RT MPC."""
-
-    power_setpoint: float  # [MW] (+discharge, -charge)
-    predicted_soc: np.ndarray  # Over horizon
-    solve_status: str  # 'optimal', 'infeasible'
-
-
-@dataclass
-class DaySimulationResult:
-    """Results from single-day simulation."""
-
-    date: pd.Timestamp
-    total_revenue: float  # [$]
-    da_revenue: float  # [$]
-    rt_revenue: float  # [$]
-    soc_trajectory: np.ndarray  # Shape (97,) for 15-min steps
-    power_trajectory: np.ndarray  # Shape (96,) [MW]
-    final_soc: float  # [0-1]
-
-    # Detailed revenue breakdowns for plotting (NEW)
-    da_step_revenues: np.ndarray  # DA revenue at each time step
-    rt_step_revenues: np.ndarray  # RT revenue at each time step
-    da_power_bids: np.ndarray  # DA bids for each time step
-    rt_imbalance: np.ndarray  # RT imbalance (actual - DA bids) for each time step
-
-
-@dataclass
-class SimulationResult:
-    """Results from multi-day simulation."""
-
-    daily_results: List[DaySimulationResult]
-    cumulative_revenue: np.ndarray  # Shape (n_days,)
-    total_revenue: float  # [$]
-    da_schedules: dict  # Maps pd.Timestamp -> DAScheduleResult

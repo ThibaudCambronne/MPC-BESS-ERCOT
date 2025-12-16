@@ -5,7 +5,7 @@ import pandas as pd
 from src.battery_model import BatteryParams
 from src.globals import PRICE_NODE
 from src.simulator import plot_day_simulation, plot_multi_day_simulation, run_simulation
-from src.utils import load_ercot_data
+from src.utils.load_ercot_data import load_ercot_data
 
 
 def main():

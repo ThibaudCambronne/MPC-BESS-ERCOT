@@ -11,7 +11,7 @@ from .forecaster import get_forecast, get_forecasts_for_da
 from .globals import DELTA_T, TIME_STEPS_PER_HOUR
 from .stage1_da_scheduler import solve_da_schedule
 from .stage2_rt_mpc import solve_rt_mpc
-from .utils import DAScheduleResult, DaySimulationResult, SimulationResult
+from .utils.utils import DAScheduleResult, DaySimulationResult, SimulationResult
 
 
 def plot_day_simulation(

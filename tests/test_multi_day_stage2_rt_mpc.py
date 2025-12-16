@@ -13,7 +13,7 @@ from src.forecaster import get_forecast
 from src.globals import DELTA_T, PRICE_NODE, TIME_STEPS_PER_HOUR
 from src.stage1_da_scheduler import solve_da_schedule
 from src.stage2_rt_mpc import solve_rt_mpc
-from src.utils import load_ercot_data
+from src.utils.load_ercot_data import load_ercot_data
 
 
 def find_interesting_days(data, top_n=3):

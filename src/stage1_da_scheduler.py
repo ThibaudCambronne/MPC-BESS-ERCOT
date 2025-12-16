@@ -5,7 +5,7 @@ import pandas as pd
 from pyomo.environ import *
 
 from .battery_model import BatteryParams
-from .utils import DAScheduleResult
+from .utils.utils import DAScheduleResult
 
 
 def solve_da_schedule(
@@ -385,7 +385,7 @@ def solve_da_schedule(
 
 
 from .forecaster import get_forecasts_for_da
-from .utils import load_ercot_data
+from .utils.load_ercot_data import load_ercot_data
 
 AMT_DAYS = 2
 

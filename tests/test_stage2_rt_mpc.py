@@ -13,7 +13,7 @@ from src.forecaster import get_forecast, get_forecasts_for_da
 from src.globals import DELTA_T, TIME_STEPS_PER_HOUR
 from src.stage1_da_scheduler import solve_da_schedule
 from src.stage2_rt_mpc import solve_rt_mpc
-from src.utils import load_ercot_data
+from src.utils.load_ercot_data import load_ercot_data
 
 
 def setup_simulation_data(sim_date, sim_horizon_hours, mpc_horizon_hours):

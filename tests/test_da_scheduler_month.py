@@ -8,7 +8,7 @@ import pytest
 from src.battery_model import BatteryParams
 from src.forecaster import get_forecasts_for_da
 from src.stage1_da_scheduler import solve_da_schedule
-from src.utils import load_ercot_data
+from src.utils.load_ercot_data import load_ercot_data
 
 # --- Configuration ---
 AMT_DAYS = 2

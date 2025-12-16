@@ -4,7 +4,7 @@ Test script for the regression-based forecaster
 
 import pandas as pd
 
-from src.forecaster import get_improved_regression_forecast
+from src.forecaster import get_xgboost_forecast
 from src.globals import DATA_PATH_RTM
 
 # Load data
@@ -26,7 +26,7 @@ print(f"  Training days: {training_days}")
 
 # Generate forecast
 try:
-    forecast = get_improved_regression_forecast(
+    forecast = get_xgboost_forecast(
         data=data,
         current_time=current_time,
         horizon_hours=horizon_hours,
