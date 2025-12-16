@@ -13,3 +13,7 @@ FREQUENCY = f"{60 // TIME_STEPS_PER_HOUR}min"
 MPC_BATTERY_EPSILON = 1e-6  # Battery capacity in MWh
 
 PRICE_NODE = "HB_SOUTH"  # Price node to use for forecasts and optimization
+WEATHER_FEATURES = [
+    "dew_point_temperature_S",
+    "temperature_S",
+]

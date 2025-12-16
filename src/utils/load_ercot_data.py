@@ -1,22 +1,25 @@
+import numpy as np
 import pandas as pd
+from matplotlib import pyplot as plt
 
 from src.globals import (
     DATA_PATH_DAM_TESTING,
     DATA_PATH_DAM_TRAINING,
     DATA_PATH_RTM,
     PRICE_NODE,
+    WEATHER_FEATURES,
 )
 
 
-def load_ercot_data() -> pd.DataFrame:
+def load_ercot_data(verbose: bool = True) -> pd.DataFrame:
     """
     Load ERCOT price and ancillary services data from a CSV file,
-    including 'dew_point_temperature_S' for the regression forecast method.
+    including all WEATHER_FEATURES for the regression forecast method.
 
     Parameters
     ----------
-    filepath : str
-        Path to the CSV file.
+    verbose : bool, optional
+        If True, displays information about missing data and interpolation, by default True
 
     Returns
     -------
@@ -24,7 +27,10 @@ def load_ercot_data() -> pd.DataFrame:
         DataFrame with datetime index and all columns from the CSV.
     """
     # Define the core columns needed for both price and regression features
-    DAM_COLUMNS = ["key", f"{PRICE_NODE}_DAM", "dew_point_temperature_S"]
+    DAM_COLUMNS = [
+        "key",
+        f"{PRICE_NODE}_DAM",
+    ] + WEATHER_FEATURES
     RTM_COLUMNS = [
         "hour_timestamp",
         PRICE_NODE,
@@ -32,7 +38,7 @@ def load_ercot_data() -> pd.DataFrame:
 
     # ====================
     # Load DAM data
-    # NOTE: Including "dew_point_temperature_S" column
+    # NOTE: Including WEATHER_FEATURES columns
     try:
         df_dam_train = pd.read_csv(DATA_PATH_DAM_TRAINING, usecols=DAM_COLUMNS)
         df_dam_test = pd.read_csv(DATA_PATH_DAM_TESTING, usecols=DAM_COLUMNS)
@@ -40,7 +46,7 @@ def load_ercot_data() -> pd.DataFrame:
         # Handle case where the new column might be missing from the files
         print(f"Error loading DAM data with required columns: {e}")
         print(
-            f"Ensure that 'dew_point_temperature_S' is present in {DATA_PATH_DAM_TRAINING} and {DATA_PATH_DAM_TESTING}."
+            f"Ensure that all WEATHER_FEATURES are present in {DATA_PATH_DAM_TRAINING} and {DATA_PATH_DAM_TESTING}."
         )
         raise
 
@@ -53,12 +59,12 @@ def load_ercot_data() -> pd.DataFrame:
     hours = df_dam["key"].str.slice(11).astype(int) - 1
     df_dam["key"] = date_parsed + pd.to_timedelta(hours, unit="h")
 
-    # Resample to 15-min intervals by forward filling (this carries the dew point temp forward too)
+    # Resample to 15-min intervals by forward filling
     df_dam = (
         df_dam.drop_duplicates()
         .set_index("key")
         .resample("15min")
-        .ffill()
+        .ffill(limit=4)
         .reset_index()
     )
 
@@ -78,24 +84,66 @@ def load_ercot_data() -> pd.DataFrame:
     df_rtm["key"] = df_rtm["key"] + pd.to_timedelta(df_rtm["minute"], unit="m")
     df_rtm = df_rtm.drop(columns=["minute"])
 
-    # Merge DAM and RTM on datetime. DAM now contains 'dew_point_temperature_S'.
+    # ====================
+    # Merge DAM and RTM on datetime. DAM now contains all WEATHER_FEATURES.
     df_all = df_dam.merge(
         df_rtm,
         on="key",
         how="inner",
     ).set_index("key")
 
-    df_all["date_str"] = df_all.index.strftime("%m/%d/%Y")
+    # Ensure only full days are kept
+    df_all["date_str"] = df_all.index.strftime("%m/%d/%Y")  # type: ignore
     group_sizes = df_all.groupby("date_str").size()
 
     hours_per_day_rtm = 24 * 4
     full_days_rtm = group_sizes[group_sizes == hours_per_day_rtm].index
-    df_all = df_all[df_all["date_str"].isin(full_days_rtm)].drop(columns=["date_str"])
+    full_days_dam = group_sizes[group_sizes == hours_per_day_rtm].index
+    df_all = df_all[
+        df_all["date_str"].isin(full_days_rtm) & df_all["date_str"].isin(full_days_dam)
+    ].drop(columns=["date_str"])
 
-    # Final check to ensure the required column is present
-    if "dew_point_temperature_S" not in df_all.columns:
-        raise RuntimeError(
-            "The column 'dew_point_temperature_S' is missing after data loading and merging. Please check your source files."
-        )
+    columns_to_interpolate = WEATHER_FEATURES
+
+    df_missing = pd.DataFrame()
+    if verbose:
+        df_missing = df_all.loc[:, columns_to_interpolate].isna().astype(int)
+
+    df_all[columns_to_interpolate] = df_all[columns_to_interpolate].interpolate(
+        method="time"
+    )
+
+    if verbose:
+        plot_start = pd.Timestamp("2025-01-15 00:00:00")
+        plot_end = pd.Timestamp("2025-01-20 23:45:00")
+        plot_data = df_all.loc[plot_start:plot_end].copy()
+        fig, axs = plt.subplots(1, len(columns_to_interpolate), figsize=(10, 4))
+        if len(columns_to_interpolate) == 1:
+            axs = [axs]
+        for i, col in enumerate(columns_to_interpolate):
+            max_val = plot_data[col].max()
+            min_val = plot_data[col].min()
+
+            axs[i].bar(
+                plot_data.index,
+                np.where(df_missing.loc[plot_data.index, col] == 1, max_val, 0),
+                width=0.01,
+                color="red",
+                alpha=0.3,
+                label="Missing Data",
+            )
+            axs[i].bar(
+                plot_data.index,
+                np.where(df_missing.loc[plot_data.index, col] == 1, min_val, 0),
+                width=0.01,
+                color="red",
+                alpha=0.3,
+            )
+
+            axs[i].plot(plot_data.index, plot_data[col], label=col)
+            axs[i].set_title("Interpolated Features")
+            axs[i].set_xlabel("Time")
+        fig.legend()
+        fig.show()
 
     return df_all
