@@ -6,6 +6,7 @@ from src.globals import (
     DATA_PATH_DAM_TESTING,
     DATA_PATH_DAM_TRAINING,
     DATA_PATH_RTM,
+    FREQUENCY,
     PRICE_NODE,
     WEATHER_FEATURES,
 )
@@ -104,6 +105,13 @@ def load_ercot_data(verbose: bool = False) -> pd.DataFrame:
     ].drop(columns=["date_str"])
 
     # ====================
+    # Make sure that all the timesteps are present
+    full_time_index = pd.date_range(
+        start=df_all.index.min(),
+        end=df_all.index.max(),
+        freq=FREQUENCY,
+    )
+    df_all = df_all.reindex(full_time_index)
     # Interpolate missing values
     columns_to_interpolate = df_all.columns  # WEATHER_FEATURES
 
@@ -116,8 +124,8 @@ def load_ercot_data(verbose: bool = False) -> pd.DataFrame:
     )
 
     if verbose:
-        plot_start = pd.Timestamp("2025-01-15 00:00:00")
-        plot_end = pd.Timestamp("2025-01-20 23:45:00")
+        plot_start = pd.Timestamp("2024-11-01 00:00:00")
+        plot_end = pd.Timestamp("2025-12-01 23:45:00")
         plot_data = df_all.loc[plot_start:plot_end].copy()
 
         # Calculate the number of rows needed for a maximum of 2 columns

@@ -231,7 +231,6 @@ def test_monthly_da_scheduler_comparison():
 
     # We generally don't use plt.show() in automated tests, but we print the path
     print(f"\nPlot saved to {output_filename}")
-    plt.close()
 
 
 if __name__ == "__main__":
