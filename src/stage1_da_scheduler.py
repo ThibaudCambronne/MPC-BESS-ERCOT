@@ -19,10 +19,10 @@ def solve_da_schedule(
     rt_dispatches_per_hour: float = 4,
     end_of_day_soc: float = 0.5,
     cvar_alpha: float = 0.90,
-    cvar_weight: float = 0.2,
+    cvar_weight: float = 0.1,
     rt_dispatch_penalty: float = 0,
     rt_uncertainty_default: float = 20,
-    n_scenarios: int = 50,
+    n_scenarios: int = 20,
     scenario_seed: Optional[int] = None,
     verbose: bool = False,
 ) -> DAScheduleResult:

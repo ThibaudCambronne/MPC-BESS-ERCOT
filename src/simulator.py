@@ -235,6 +235,8 @@ def simulate_day(
     horizon_type: Literal["shrinking", "receding"] = "receding",
 ) -> DaySimulationResult:
     """
+    NOTE: Running rt MPC with perfect forecast (assuming we improve forecasting accuracy in real time) 
+
     Simulate one complete day (24 hours) using pre-computed DA commitments.
 
     The DA schedule should have been computed at 10:00 AM the previous day.
@@ -309,10 +311,11 @@ def simulate_day(
         )
 
         # Solve RT MPC
+        # NOTE: giving acutal RT prices
         rt_result = solve_rt_mpc(
             current_time=current_time,
             current_soc=current_soc,
-            rt_price_forecast=rt_price_forecast,
+            rt_price_forecast=actual_rt_prices,
             da_commitments=da_schedule,
             battery=battery,
             horizon_type=horizon_type,
@@ -470,14 +473,19 @@ def plot_multi_day_simulation(
                 method="perfect",
             )
 
-            # Run DA scheduler with perfect forecasts
-            perfect_da_schedule = solve_da_schedule(
-                da_price_forecast=perfect_da_prices,
-                rt_price_forecast=perfect_rt_prices,
-                battery=battery,
-                initial_soc=current_soc,
-                end_of_day_soc=0.5,
-            )
+            for i in range(2):
+                try:
+                    # Run DA scheduler with perfect forecasts
+                    perfect_da_schedule = solve_da_schedule(
+                        da_price_forecast=perfect_da_prices,
+                        rt_price_forecast=perfect_rt_prices,
+                        battery=battery,
+                        initial_soc=current_soc,
+                        end_of_day_soc=0.5,
+                    )
+                except Exception as e:
+                    print(f"Error running DA scheduler")
+                    break
 
             # Calculate perfect revenue for this day using actual prices
             actual_da_prices_arr = np.array(perfect_da_prices)  # Already perfect
@@ -716,7 +724,7 @@ def plot_multi_day_simulation(
 
 def run_simulation(
     data: pd.DataFrame,
-    start_date: pd.Timestamp,
+    start_date: pd.Timestamp = "2024-06-01 10:00:00",
     n_days: int = 3,
     battery: Optional[BatteryParams] = None,
     forecast_method: Literal["persistence", "perfect"] = "perfect",
@@ -801,8 +809,18 @@ def run_simulation(
 
         # Get forecasts using the special DA function
         da_prices, rt_prices = get_forecasts_for_da(
-            data=data, current_time=da_time, horizon_hours=24, method=forecast_method
+            data=data, current_time=da_time, horizon_hours=48, method=forecast_method
         )
+
+        real_da_prices, real_rt_prices = get_forecasts_for_da(
+            data=data,
+            current_time=da_time,
+            horizon_hours=48,
+            method="perfect",
+        )
+
+        unc_input = (rt_prices - real_rt_prices).abs()
+
 
         # Estimate SOC at start of the target day
         # For the first day, use initial_soc
@@ -818,7 +836,8 @@ def run_simulation(
             rt_price_forecast=rt_prices,
             battery=battery,
             initial_soc=est_initial_soc,
-            end_of_day_soc=end_of_day_soc,
+            rt_price_uncertainty=unc_input,
+            
         )
 
         # Store forecast prices used (for debugging/plotting)
