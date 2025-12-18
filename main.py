@@ -42,7 +42,55 @@ def main():
         print(f"    RT Revenue: ${day_result.rt_revenue:,.2f}")
         print(f"    Final SOC: {day_result.final_soc:.2%}")
     
-    # Create plots folder if it doesn't exist
+    daily_data_list = []
+    for day_result in results.daily_results:
+        daily_data_list.append({
+            "Date": day_result.date.date(),
+            "Total Revenue": day_result.total_revenue,
+            "DA Revenue": day_result.da_revenue,
+            "RT Revenue": day_result.rt_revenue,
+            "Final SOC": day_result.final_soc
+        })
+
+    # 2. Create DataFrame and Save to CSV
+    df_daily = pd.DataFrame(daily_data_list)
+    csv_filename = f"simulation_results_{start_date.strftime('%Y%m%d')}.csv"
+    df_daily.to_csv(csv_filename, index=False)
+    # 1. Initialize a list to hold all interval rows
+    all_intervals = []
+
+    for day_result in results.daily_results:
+        # Get the date and slice the original data for this specific day
+        # Assuming 'data' is indexed by datetime and covers the simulation range
+        day_start = day_result.date
+        day_end = day_start + pd.Timedelta(days=1) - pd.Timedelta(minutes=15)
+        
+        # Get market prices for these 96 intervals
+        day_market_data = data.loc[day_start:day_end].copy()
+        
+        # Check if trajectory length matches market data (usually 96 intervals)
+        # If soc_trajectory has 97 points (including start of next day), use [:96]
+        soc_values = day_result.soc_trajectory[:len(day_market_data)]
+        
+        day_market_data['SOC'] = soc_values
+        
+        # Calculate Power (MW) based on Change in SOC (MWh)
+        # Power = (Delta SOC) / (Time Step in hours)
+        # 15 mins = 0.25 hours
+        day_market_data['Net_Power_MW'] = day_market_data['SOC'].diff().fillna(0) / 0.25
+        
+        all_intervals.append(day_market_data)
+
+    # 2. Concatenate all days into one master DataFrame
+    df_intervals_full = pd.concat(all_intervals)
+
+    # 3. Save to CSV
+    interval_csv_path = f"interval_analysis_{start_date.strftime('%Y%m%d')}.csv"
+    df_intervals_full.to_csv(interval_csv_path)
+
+    print(f"✅ Full 15-minute data saved to: {interval_csv_path}")
+
+   # Create plots folder if it doesn't exist
     plots_dir = "plots"
     os.makedirs(plots_dir, exist_ok=True)
     
@@ -53,7 +101,7 @@ def main():
     end_date = start_date + pd.Timedelta(days=n_days-1)
     multi_day_plot_path = os.path.join(plots_dir, f"multi_day_simulation_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.png")
     plot_multi_day_simulation(results, data=data, battery=battery, save_path=multi_day_plot_path)
-    
+
     # # Individual day plots
     # for i, day_result in enumerate(results.daily_results):
     #     # Get actual prices for this day

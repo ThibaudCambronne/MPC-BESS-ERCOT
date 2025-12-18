@@ -786,9 +786,6 @@ def run_simulation(
     # Initialize storage
     daily_results = []
     cumulative_revenue = np.zeros(n_days)
-
-    # Track SOC and DA schedules
-    current_soc = initial_soc
     da_schedules = {}  # Maps date -> DAScheduleResult
 
     print(f"\n{'=' * 60}")
@@ -799,62 +796,53 @@ def run_simulation(
     print(f"Forecast method: {forecast_method}, Horizon type: {horizon_type}")
     print(f"{'=' * 60}\n")
 
-    # Pre-compute DA schedules for all days
-    # For each day, run DA scheduler at 10 AM the previous day
-    for i, sim_date in enumerate(dates):
-        # DA market runs at 10 AM the day before
-        da_time = sim_date - pd.Timedelta(days=1) + pd.Timedelta(hours=10)
+    # Track SOC across days
+    current_soc = initial_soc
 
-        print(f"[{da_time}] Running DA scheduler for {sim_date.date()}...")
+    # Run DA scheduler for the first day (at 10 AM the day before)
+    first_sim_date = dates[0]
+    da_time = first_sim_date - pd.Timedelta(days=1) + pd.Timedelta(hours=10)
 
-        # Get forecasts using the special DA function
-        da_prices, rt_prices = get_forecasts_for_da(
-            data=data, current_time=da_time, horizon_hours=48, method=forecast_method
-        )
+    print(f"[{da_time}] Running DA scheduler for {first_sim_date.date()}...")
 
-        real_da_prices, real_rt_prices = get_forecasts_for_da(
-            data=data,
-            current_time=da_time,
-            horizon_hours=48,
-            method="perfect",
-        )
+    # Get forecasts for first day
+    da_prices, rt_prices = get_forecasts_for_da(
+        data=data, current_time=da_time, horizon_hours=48, method=forecast_method
+    )
 
-        unc_input = (rt_prices - real_rt_prices).abs()
+    real_da_prices, real_rt_prices = get_forecasts_for_da(
+        data=data,
+        current_time=da_time,
+        horizon_hours=48,
+        method="perfect",
+    )
 
+    unc_input = (rt_prices - real_rt_prices).abs()
 
-        # Estimate SOC at start of the target day
-        # For the first day, use initial_soc
-        # For subsequent days, use end_of_day_soc as estimate (actual may differ)
-        if i == 0:
-            est_initial_soc = initial_soc
-        else:
-            est_initial_soc = end_of_day_soc
+    # Solve DA optimization for first day
+    da_schedule = solve_da_schedule(
+        da_price_forecast=da_prices,
+        rt_price_forecast=rt_prices,
+        battery=battery,
+        initial_soc=initial_soc,
+        rt_price_uncertainty=unc_input,
+    )
 
-        # Solve DA optimization
-        da_schedule = solve_da_schedule(
-            da_price_forecast=da_prices,
-            rt_price_forecast=rt_prices,
-            battery=battery,
-            initial_soc=est_initial_soc,
-            rt_price_uncertainty=unc_input,
-            
-        )
+    # Store forecast prices used
+    da_schedule.da_price_forecast = np.array(da_prices.values)
+    da_schedule.rt_price_forecast = np.array(rt_prices.values)
 
-        # Store forecast prices used (for debugging/plotting)
-        da_schedule.da_price_forecast = np.array(da_prices.values)
-        da_schedule.rt_price_forecast = np.array(rt_prices.values)
+    da_schedules[first_sim_date] = da_schedule
 
-        da_schedules[sim_date] = da_schedule
-
-    # Now simulate each day using the pre-computed DA schedules
     print(f"\n{'=' * 60}")
     print("RUNNING REAL-TIME SIMULATION")
     print(f"{'=' * 60}\n")
 
+    # Main simulation loop
     for i, sim_date in enumerate(dates):
         print(f"[{sim_date}] Simulating day {i + 1}/{n_days}...")
 
-        # Get DA schedule for this day (computed at 10 AM yesterday)
+        # Get DA schedule for this day
         da_schedule = da_schedules[sim_date]
 
         # Run RT MPC for the whole day
@@ -883,6 +871,42 @@ def run_simulation(
         print(
             f"  Revenue: ${day_result.total_revenue:,.2f}, Final SOC: {day_result.final_soc:.1%}"
         )
+
+        # After completing RT simulation, run DA scheduler for the NEXT day (if exists)
+        if i < n_days - 1:
+            next_sim_date = dates[i + 1]
+            da_time = sim_date + pd.Timedelta(hours=10)  # 10 AM today for tomorrow
+
+            print(f"\n[{da_time}] Running DA scheduler for {next_sim_date.date()}...")
+
+            # Get forecasts for next day
+            da_prices, rt_prices = get_forecasts_for_da(
+                data=data, current_time=da_time, horizon_hours=48, method=forecast_method
+            )
+
+            real_da_prices, real_rt_prices = get_forecasts_for_da(
+                data=data,
+                current_time=da_time,
+                horizon_hours=48,
+                method="perfect",
+            )
+
+            unc_input = (rt_prices - real_rt_prices).abs()
+
+            # Use actual final SOC from today's RT simulation
+            da_schedule = solve_da_schedule(
+                da_price_forecast=da_prices,
+                rt_price_forecast=rt_prices,
+                battery=battery,
+                initial_soc=current_soc,  # Use actual SOC from RT simulation
+                rt_price_uncertainty=unc_input,
+            )
+
+            # Store forecast prices used
+            da_schedule.da_price_forecast = np.array(da_prices.values)
+            da_schedule.rt_price_forecast = np.array(rt_prices.values)
+
+            da_schedules[next_sim_date] = da_schedule
 
     # Calculate total revenue
     total_revenue = float(sum(day.total_revenue for day in daily_results))
