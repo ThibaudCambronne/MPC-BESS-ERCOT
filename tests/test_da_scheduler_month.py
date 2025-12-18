@@ -44,13 +44,30 @@ def test_monthly_da_scheduler_comparison():
             "linestyle": ":",
             "type": "xgboost",
         },
-        "Conservative xgboost (w=0.1, Unc=20)": {
+        # "Conservative xgboost (w=0.1, Unc=20)": {
+        #     "cvar_weight": 0.1,
+        #     "rt_uncertainty_default": 20,
+        #     "rt_dispatch_penalty": 0,
+        #     "color": "#0a2980",
+        #     "linestyle": ":",
+        #     "type": "xgboost",
+        # },
+        "Risk-Averse Persistance (w=0.1, Unc=20)": {
             "cvar_weight": 0.1,
             "rt_uncertainty_default": 20,
             "rt_dispatch_penalty": 0,
-            "color": "#0a2980",
+            "color": "#eddd00",
             "linestyle": ":",
-            "type": "xgboost",
+            "type": "persistence",
+        },
+        "Perfect Uncertainty Persistance (w=0.1, Unc=20)": {
+            "cvar_weight": 0.1,
+            "rt_uncertainty_default": 20,
+            "use_perfect_uncertainty": True,
+            "rt_dispatch_penalty": 0,
+            "color": "#fb7d00",
+            "linestyle": ":",
+            "type": "persistence",
         },
         "Perfect Uncertainty xgboost (w=0.1)": {
             "cvar_weight": 0.1,
@@ -76,6 +93,15 @@ def test_monthly_da_scheduler_comparison():
             "color": "tab:green",
             "linestyle": "-",
             "type": "regression",
+        },
+        "Perfect Uncertainty regression (w=0.1)": {
+            "cvar_weight": 0.1,
+            "rt_uncertainty_default": 0,
+            "rt_dispatch_penalty": 0,
+            "use_perfect_uncertainty": True,
+            "color": "#62e647",
+            "linestyle": ":",
+            "type": "xgboost",
         },
         # "Perfect Forecast": {
         #     "cvar_weight": 0,
@@ -198,7 +224,7 @@ def test_monthly_da_scheduler_comparison():
     # Create the 'tests' directory if it doesn't exist so plotting doesn't fail
     os.makedirs("tests", exist_ok=True)
 
-    fig, ax = plt.subplots(1, 1, figsize=(12, 7))
+    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
     sorted_names = sorted(
         results_comparison.keys(),
         key=lambda k: results_comparison[k]["total_revenue"],
