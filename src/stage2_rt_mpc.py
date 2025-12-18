@@ -73,18 +73,19 @@ def solve_rt_mpc(
     w_slack = 1e5
 
     # Variables
-    # P_RT (Orange Line) IS constrained by P_max
-    model.P_RT = pyo.Var(
-        model.T, domain=pyo.Reals, bounds=(-battery.power_max_mw, battery.power_max_mw)
-    )
+    # P_RT can be positive (buying more) or negative (selling back)
+    # It's unbounded because we can sell excess DA purchases
+    model.P_RT = pyo.Var(model.T, domain=pyo.Reals)
 
-    # Physical Flows (Green Line Components)
+    # Physical battery flows (limited by battery power capacity)
     model.P_ch = pyo.Var(
         model.T, domain=pyo.NonNegativeReals, bounds=(0, battery.power_max_mw)
     )
     model.P_dis = pyo.Var(
-        model.T, domain=pyo.NonPositiveReals, bounds=(-battery.power_max_mw, 0)
+        model.T, domain=pyo.NonNegativeReals, bounds=(0, battery.power_max_mw)
     )
+    
+    # Energy storage
     model.E = pyo.Var(model.T_E, bounds=(E_min, E_max))
 
     # Slack
@@ -95,28 +96,38 @@ def solve_rt_mpc(
         expr=model.E[0] == current_soc * battery.capacity_mwh
     )
 
-    # Power Balance: P_DA + P_RT = P_ch + P_dis
-    # This equation links the constrained P_RT to the physical P_ch/P_dis.
-    # Note: If P_DA is 25 and P_RT is limited to 25, P_net can be 50?
-    # NO. P_ch/P_dis are ALSO bounded by power_max_mw.
-    # So P_net is bounded by [-Pmax, Pmax] via the physics variables.
-    # AND P_RT is bounded by [-Pmax, Pmax] via variable bounds.
-    # Both limits apply simultaneously.
+    # Power Balance: P_DA (already purchased) + P_RT (adjustment) = P_ch - P_dis
+    # P_ch: power going into battery (positive)
+    # P_dis: power coming from battery (positive)
+    # Net battery power = P_ch - P_dis
+    # If P_DA + P_RT > 0: excess power must charge battery or be sold (negative P_RT)
+    # If P_DA + P_RT < 0: deficit must discharge battery or be bought (positive P_RT)
     def power_balance_rule(m, t):
-        return m.P_DA[t] + m.P_RT[t] == m.P_ch[t] + m.P_dis[t]
+        return m.P_DA[t] + m.P_RT[t] == m.P_ch[t] - m.P_dis[t]
 
     model.power_balance = pyo.Constraint(model.T, rule=power_balance_rule)
 
+    # Battery dynamics
     def dynamics_rule(m, t):
         if t < T:
+            # Energy increases with charging (efficiency loss), decreases with discharging
             power_flow = (
                 m.P_ch[t] * battery.efficiency_charge
-                + m.P_dis[t] / battery.efficiency_discharge
+                - m.P_dis[t] / battery.efficiency_discharge
             )
             return m.E[t + 1] == m.E[t] + power_flow * DELTA_T
         return pyo.Constraint.Skip
 
     model.dynamics = pyo.Constraint(model.T, rule=dynamics_rule)
+
+    # Prevent simultaneous charge and discharge
+    def no_simultaneous_rule(m, t):
+        # This is implicit if we use binary variables, but for continuous optimization
+        # we rely on the optimizer to avoid this inefficiency
+        # If needed, add: m.P_ch[t] * m.P_dis[t] == 0 (nonlinear) or use binary variables
+        return pyo.Constraint.Skip
+
+    model.no_simultaneous = pyo.Constraint(model.T, rule=no_simultaneous_rule)
 
     # Soft SoC Limits
     def soc_min_soft(m, t):
@@ -138,10 +149,14 @@ def solve_rt_mpc(
 
     # --- 4. Objective ---
     def obj_rule(m):
-        # Market Cost
-        cost_market = sum(m.c_RT[t] * m.P_RT[t] for t in m.T) * DELTA_T
+        # RT Market Cost: Only pay for RT adjustments
+        # Positive P_RT = buying more (cost)
+        # Negative P_RT = selling back (revenue)
+        cost_rt_market = sum(m.c_RT[t] * m.P_RT[t] for t in m.T) * DELTA_T
 
-        # Tracking Cost
+        # DA cost is sunk - already paid, not part of optimization
+
+        # Tracking Cost (optional, can be removed if not needed)
         cost_tracking = sum(
             w_tracking * (m.E[t] - m.SoC_Target[t] * battery.capacity_mwh) ** 2
             for t in m.T
@@ -150,8 +165,7 @@ def solve_rt_mpc(
         # Slack Penalty
         cost_slack = sum(w_slack * m.s_soc[t] for t in m.T_E)
 
-        # return cost_market + cost_tracking + cost_slack
-        return cost_market + cost_slack
+        return cost_rt_market + cost_tracking + cost_slack
 
     model.objective = pyo.Objective(rule=obj_rule, sense=pyo.minimize)
 
@@ -174,7 +188,11 @@ def solve_rt_mpc(
     ):
         p_rt_opt = pyo.value(model.P_RT[0])
         p_da_fixed = pyo.value(model.P_DA[0])
-        power_setpoint = p_da_fixed + p_rt_opt
+        
+        # The actual power setpoint for the battery is the net flow
+        p_ch_opt = pyo.value(model.P_ch[0])
+        p_dis_opt = pyo.value(model.P_dis[0])
+        power_setpoint = p_ch_opt - p_dis_opt  # Net power to/from battery
 
         soc_traj = (
             np.array([pyo.value(model.E[t]) for t in model.T_E]) / battery.capacity_mwh

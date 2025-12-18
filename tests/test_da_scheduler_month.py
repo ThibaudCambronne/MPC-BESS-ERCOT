@@ -103,6 +103,15 @@ def test_monthly_da_scheduler_comparison():
             "linestyle": ":",
             "type": "xgboost",
         },
+        "Baseline Persistance, just DA market (w=0.1)": {
+            "cvar_weight": 0,
+            "rt_uncertainty_default": 0,
+            "rt_dispatch_penalty": 1e5,
+            "use_perfect_uncertainty": True,
+            "color": "#e64797",
+            "linestyle": ":",
+            "type": "xgboost",
+        },
         # "Perfect Forecast": {
         #     "cvar_weight": 0,
         #     "rt_uncertainty_default": 0,
