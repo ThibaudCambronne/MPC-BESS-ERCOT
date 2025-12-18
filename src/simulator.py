@@ -831,8 +831,8 @@ def run_simulation(
     # Store forecast prices used
     da_schedule.da_price_forecast = np.array(da_prices.values)
     da_schedule.rt_price_forecast = np.array(rt_prices.values)
-    # Getting just first day from day ahead
-    da_schedules[first_sim_date] = da_schedule[:24*4]
+
+    da_schedules[first_sim_date] = da_schedule
 
     print(f"\n{'=' * 60}")
     print("RUNNING REAL-TIME SIMULATION")
