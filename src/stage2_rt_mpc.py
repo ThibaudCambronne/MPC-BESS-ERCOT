@@ -34,6 +34,8 @@ def solve_rt_mpc(
     )
     T = len(horizon_index)
 
+    mean_price = rt_price_forecast.mean()
+
     if T == 0:
         return RTMPCResult(0.0, np.array([current_soc]), "empty_horizon")
 
@@ -157,15 +159,20 @@ def solve_rt_mpc(
         # DA cost is sunk - already paid, not part of optimization
 
         # Tracking Cost (optional, can be removed if not needed)
-        cost_tracking = sum(
-            w_tracking * (m.E[t] - m.SoC_Target[t] * battery.capacity_mwh) ** 2
-            for t in m.T
-        )
+        # cost_tracking = sum(
+        #     w_tracking * (m.E[t] - m.SoC_Target[t] * battery.capacity_mwh) ** 2
+        #     for t in m.T
+        # )
 
         # Slack Penalty
         cost_slack = sum(w_slack * m.s_soc[t] for t in m.T_E)
 
-        return cost_rt_market + cost_tracking + cost_slack
+        # return cost_rt_market + cost_tracking + cost_slack
+        
+        # SOC value 
+        cost_soc = mean_price * m.s_soc[m.T_E[-1]] * battery.capacity_mwh
+
+        return cost_rt_market + cost_slack - cost_soc
 
     model.objective = pyo.Objective(rule=obj_rule, sense=pyo.minimize)
 
