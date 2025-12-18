@@ -69,7 +69,6 @@ def solve_rt_mpc(
     Z = 2.0
 
     # Weights
-    w_tracking = 0.1
     w_slack = 1e5
 
     # Variables
@@ -140,12 +139,6 @@ def solve_rt_mpc(
     def obj_rule(m):
         # Market Cost
         cost_market = sum(m.c_RT[t] * m.P_RT[t] for t in m.T) * DELTA_T
-
-        # Tracking Cost
-        cost_tracking = sum(
-            w_tracking * (m.E[t] - m.SoC_Target[t] * battery.capacity_mwh) ** 2
-            for t in m.T
-        )
 
         # Slack Penalty
         cost_slack = sum(w_slack * m.s_soc[t] for t in m.T_E)
