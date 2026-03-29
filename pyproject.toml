@@ -15,8 +15,10 @@ dependencies = [
     "pyomo>=6.9.5",
     "logging>=0.4.9.6",
     "scikit-learn>=1.8.0",
+    "streamlit>=1.49.0",
     "torch>=2.9.1",
     "xgboost>=3.1.2",
+    "plotly",
     "tqdm>=4.67.1",
 ]
 

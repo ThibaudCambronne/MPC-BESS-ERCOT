@@ -30,6 +30,7 @@ uv sync
 ## Data Setup
 
 The simulator requires three CSV files in the `data/` directory:
+
 - `All_2020_2024_with_AS.csv` - Day-ahead market training data
 - `All_2025_with_AS.csv` - Day-ahead market testing data
 - `RTM_all_2020_2025_enriched.csv` - Real-time market data
@@ -42,6 +43,14 @@ Run the default 3-day simulation:
 
 ```bash
 uv run main.py
+```
+
+## Running The Streamlit App
+
+Start the multipage dashboard:
+
+```bash
+uv run streamlit run app/main.py
 ```
 
 ### Custom Simulation
@@ -109,7 +118,7 @@ for day in results.daily_results:
 
 ## Example Output
 
-```
+```text
 Loading ERCOT data...
 Data loaded: 204768 intervals from 2020-01-01 00:00:00 to 2025-11-07 23:45:00
 
@@ -136,14 +145,6 @@ Daily Breakdown:
     DA Revenue: $2,614.04
     RT Revenue: $-22.08
     Final SOC: 10.00%
-```
-
-## Development
-
-Run tests:
-
-```bash
-uv run pytest
 ```
 
 ## License
