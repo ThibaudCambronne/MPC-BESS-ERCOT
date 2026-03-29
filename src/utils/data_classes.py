@@ -5,11 +5,9 @@ import numpy as np
 import pandas as pd
 
 
-# The dataclasses below were not modified as they are not relevant to the data loading logic.
 @dataclass
 class DAScheduleResult:
-    """Results from Stage 1 DA optimization.
-    CHANGED!"""
+    """Results from Stage 1 DA optimization."""
 
     da_energy_bids: np.ndarray  # Shape (24,) [MW]
     rt_energy_bids: np.ndarray  # Shape (288,) [MW]

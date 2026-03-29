@@ -6,12 +6,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from .battery_model import BatteryParams
-from .forecaster import get_forecast, get_forecasts_for_da
+from .forecasts.forecaster import get_forecast, get_forecasts_for_da
 from .globals import DELTA_T, TIME_STEPS_PER_HOUR
 from .stage1_da_scheduler import solve_da_schedule
 from .stage2_rt_mpc import solve_rt_mpc
-from .utils.utils import DAScheduleResult, DaySimulationResult, SimulationResult
+from .utils.battery_model import BatteryParams
+from .utils.data_classes import DAScheduleResult, DaySimulationResult, SimulationResult
 
 
 def plot_day_simulation(
@@ -235,7 +235,7 @@ def simulate_day(
     horizon_type: Literal["shrinking", "receding"] = "receding",
 ) -> DaySimulationResult:
     """
-    NOTE: Running rt MPC with perfect forecast (assuming we improve forecasting accuracy in real time) 
+    NOTE: Running rt MPC with perfect forecast (assuming we improve forecasting accuracy in real time)
 
     Simulate one complete day (24 hours) using pre-computed DA commitments.
 
@@ -483,8 +483,8 @@ def plot_multi_day_simulation(
                         initial_soc=current_soc,
                         end_of_day_soc=0.5,
                     )
-                except Exception as e:
-                    print(f"Error running DA scheduler")
+                except Exception:
+                    print("Error running DA scheduler")
                     break
 
             # Calculate perfect revenue for this day using actual prices
@@ -881,7 +881,10 @@ def run_simulation(
 
             # Get forecasts for next day
             da_prices, rt_prices = get_forecasts_for_da(
-                data=data, current_time=da_time, horizon_hours=48, method=forecast_method
+                data=data,
+                current_time=da_time,
+                horizon_hours=48,
+                method=forecast_method,
             )
 
             real_da_prices, real_rt_prices = get_forecasts_for_da(

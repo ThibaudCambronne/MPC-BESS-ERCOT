@@ -1,126 +1,23 @@
 from typing import Literal
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xgboost as xgb
-from sklearn.linear_model import LinearRegression
 
-from src.globals import FREQUENCY, PRICE_NODE, TIME_STEPS_PER_HOUR, WEATHER_FEATURES
-
-
-def _add_cyclical_time_features(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    """Encodes cyclical time features (hour and day of week) using sine and cosine transformations."""
-    time_in_minutes = df.index.day * 24 * 60 + df.index.hour * 60 + df.index.minute
-    # time of the hour
-    df["minute_sin"] = np.sin(2 * np.pi * time_in_minutes / 60)
-    df["minute_cos"] = np.cos(2 * np.pi * time_in_minutes / 60)
-
-    # Time of the day
-    df["hour_sin"] = np.sin(2 * np.pi * time_in_minutes / (24 * 60))
-    df["hour_cos"] = np.cos(2 * np.pi * time_in_minutes / (24 * 60))
-
-    # Day of the week
-    df["day_of_week_sin"] = np.sin(2 * np.pi * df.index.dayofweek / 7)
-    df["day_of_week_cos"] = np.cos(2 * np.pi * df.index.dayofweek / 7)
-
-    time_features_cols = [
-        "minute_sin",
-        "minute_cos",
-        "hour_sin",
-        "hour_cos",
-        "day_of_week_sin",
-        "day_of_week_cos",
-    ]
-
-    return df, time_features_cols
-
-
-def _prepare_training_data(
-    data: pd.DataFrame,
-    current_time: pd.Timestamp,
-    price_col: str,
-    training_days: int,
-    number_of_lags: int,
-    verbose: bool = False,
-) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    """
-    Prepare training data for forecasting models.
-
-    This function encapsulates the data preparation logic used by both the XGBoost
-    and regression forecasting methods. It creates features including:
-    - Cyclical encoding for hour and day of week
-    - Weather features
-    - Lagged price features
-
-    Returns:
-        X_train: Training features
-        y_train: Training target
-        feature_cols: List of feature column names
-    """
-    required_cols = WEATHER_FEATURES + [price_col]
-    if not all(col in data.columns for col in required_cols):
-        raise ValueError(
-            f"Missing required columns in data: {', '.join([c for c in required_cols if c not in data.columns])}"
-        )
-
-    # Define training period
-    training_start = current_time - pd.Timedelta(days=training_days)
-    training_end = current_time
-
-    historical_data = data.loc[:current_time].copy()
-
-    # Create the lagged price features
-    lag_cols = []
-    lagged_data = []
-    for lag in range(1, number_of_lags + 1):
-        lag_col_name = f"lagged_price_{lag}"
-        lag_cols.append(lag_col_name)
-        lagged_data.append(historical_data[price_col].shift(lag).rename(lag_col_name))
-
-    # Concatenate all lagged columns at once
-    historical_data = pd.concat([historical_data] + lagged_data, axis=1)
-
-    training_data = historical_data.loc[
-        (historical_data.index >= training_start)
-        & (historical_data.index < training_end)
-    ].copy()
-
-    # Apply cyclical encoding
-    training_data, time_features_cols = _add_cyclical_time_features(training_data)
-
-    if verbose:
-        fig, ax = plt.subplots(figsize=(10, 4))
-        for time_feature in time_features_cols:
-            ax.plot(
-                training_data.index,
-                training_data[time_feature],
-                label=time_feature,
-            )
-        ax.set_title("Time Features")
-        ax.set_xlabel("Time")
-        ax.set_ylabel("Value")
-        ax.legend()
-        fig.show()
-
-    # Define feature columns
-    all_feature_cols = time_features_cols + WEATHER_FEATURES + lag_cols
-
-    # Prepare training features and target
-    X_train = training_data[all_feature_cols].values
-    y_train = training_data[price_col].values
-
-    # Remove rows with NaN values
-    valid_mask = ~np.isnan(X_train).any(axis=1) & ~np.isnan(y_train)
-    X_train = X_train[valid_mask]
-    y_train = y_train[valid_mask]
-
-    if len(X_train) == 0:
-        raise ValueError(
-            "No valid training data after feature engineering and NaN removal."
-        )
-
-    return X_train, y_train, all_feature_cols
+from src.forecasts.add_cyclical_time_features import (
+    add_cyclical_time_features,
+)
+from src.forecasts.build_forecast_vs_actual_plotly_figure import (
+    build_forecast_vs_actual_plotly_figure,
+)
+from src.forecasts.train_regression_model import train_regression_model
+from src.forecasts.train_xgboost_model import train_xgboost_model
+from src.globals import (
+    FREQUENCY,
+    PRICE_NODE,
+    TIME_STEPS_PER_HOUR,
+    TYPE_FORECASTS,
+    WEATHER_FEATURES,
+)
 
 
 def _generate_forecast(
@@ -158,7 +55,7 @@ def _generate_forecast(
             [{"hour": timestamp.hour, "day_of_week": timestamp.dayofweek}],
             index=[timestamp],
         )
-        temp_df, time_features_cols = _add_cyclical_time_features(temp_df)
+        temp_df, time_features_cols = add_cyclical_time_features(temp_df)
 
         # Get weather features
         weather_features = data.loc[timestamp, WEATHER_FEATURES]
@@ -190,73 +87,12 @@ def _generate_forecast(
     return forecast
 
 
-def _train_regression_model(
-    data: pd.DataFrame,
-    current_time: pd.Timestamp,
-    price_col: str,
-    training_days: int,
-    number_of_lags: int,
-):
-    """
-    Train a linear regression model for price forecasting.
-    """
-
-    # Prepare training data
-    X_train, y_train, feature_cols = _prepare_training_data(
-        data=data,
-        current_time=current_time,
-        price_col=price_col,
-        training_days=training_days,
-        number_of_lags=number_of_lags,
-    )
-
-    # Train linear regression model
-    model = LinearRegression()
-    model.fit(X_train, y_train)
-    return model
-
-
-def _train_xgboost_model(
-    data: pd.DataFrame,
-    current_time: pd.Timestamp,
-    price_col: str,
-    training_days: int,
-    number_of_lags: int,
-):
-    """
-    Train an XGBoost model for price forecasting.
-    """
-
-    # Prepare training data
-    X_train, y_train, feature_cols = _prepare_training_data(
-        data=data,
-        current_time=current_time,
-        price_col=price_col,
-        training_days=training_days,
-        number_of_lags=number_of_lags,
-    )
-
-    # Initialize XGBoost Regressor
-    model = xgb.XGBRegressor(
-        objective="reg:squarederror",
-        n_estimators=100,
-        max_depth=5,
-        learning_rate=0.1,
-        random_state=42,
-        tree_method="hist",  # Faster training
-    )
-
-    # Fit the model
-    model.fit(X_train, y_train)
-    return model
-
-
 def get_forecast(
     data: pd.DataFrame,
     current_time: pd.Timestamp,
     horizon_hours: int,
     market: Literal["DA", "RT"],
-    method: Literal["persistence", "perfect", "xgboost", "regression"],
+    method: TYPE_FORECASTS,
     price_node: str = PRICE_NODE,
     training_days: int = 70,
     number_of_lags: int = 96 + 10,
@@ -320,7 +156,7 @@ def get_forecast(
 
     elif method == "xgboost":
         # Train the XGBoost model
-        model = _train_xgboost_model(
+        model = train_xgboost_model(
             data=data,
             current_time=current_time,
             price_col=price_col,
@@ -338,7 +174,7 @@ def get_forecast(
         )
     elif method == "regression":
         # Train the regression model
-        model = _train_regression_model(
+        model = train_regression_model(
             data=data,
             current_time=current_time,
             price_col=price_col,
@@ -361,34 +197,14 @@ def get_forecast(
     forecast.name = f"{market}_forecast"
 
     if verbose:
-        # Historical window: current_time - horizon_hours to current_time
-        hist_start = current_time - pd.Timedelta(hours=horizon_hours)
-        hist_end = current_time + pd.Timedelta(hours=horizon_hours)
-        # Select historical data
-        historical = data.loc[
-            (data.index >= hist_start) & (data.index <= hist_end), price_col
-        ]
-        # Plot
-        plt.figure(figsize=(10, 5))
-        plt.plot(
-            list(historical.index),
-            list(historical.values),
-            label="Historical",
-            color="tab:blue",
+        figure = build_forecast_vs_actual_plotly_figure(
+            current_time=current_time,
+            data=data,
+            forecasts={method: forecast},
+            market=market,
+            price_col=price_col,
         )
-        plt.plot(
-            list(forecast.index),
-            list(forecast.values),
-            label="Forecast",
-            color="tab:orange",
-        )
-        plt.axvline(current_time, color="k", linestyle="--", label="Current Time")
-        plt.xlabel("Time")
-        plt.ylabel("Price")
-        plt.title(f"{market} Price Forecast ({method})")
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+        figure.show()
     return forecast
 
 
@@ -396,7 +212,7 @@ def get_forecasts_for_da(
     data: pd.DataFrame,
     current_time: pd.Timestamp,
     horizon_hours: int,
-    method: Literal["persistence", "perfect", "xgboost", "regression"],
+    method: TYPE_FORECASTS,
     price_node: str = PRICE_NODE,
     verbose: bool = False,
 ) -> tuple[pd.Series, pd.Series]:

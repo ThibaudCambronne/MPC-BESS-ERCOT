@@ -4,7 +4,7 @@ Test script for the regression-based forecaster
 
 import pandas as pd
 
-from src.forecaster import get_xgboost_forecast
+from src.forecasts.forecaster import get_xgboost_forecast
 from src.globals import DATA_PATH_RTM
 
 # Load data

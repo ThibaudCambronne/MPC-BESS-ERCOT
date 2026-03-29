@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 DATA_PATH_DAM_TRAINING = (
     Path(__file__).parent.parent / "data" / "All_2020_2024_with_AS.csv"
@@ -17,3 +18,5 @@ WEATHER_FEATURES = [
     "dew_point_temperature_S",
     "temperature_S",
 ]
+
+TYPE_FORECASTS = Literal["persistence", "perfect", "xgboost", "regression"]

@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 from pyomo.environ import *
 
-from .battery_model import BatteryParams
-from .utils.utils import DAScheduleResult
+from .utils.battery_model import BatteryParams
+from .utils.data_classes import DAScheduleResult
 
 
 def solve_da_schedule(

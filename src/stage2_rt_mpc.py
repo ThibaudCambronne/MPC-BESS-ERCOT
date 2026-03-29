@@ -6,8 +6,8 @@ import pyomo.environ as pyo
 
 from src.globals import DELTA_T, FREQUENCY, MPC_BATTERY_EPSILON
 
-from .battery_model import BatteryParams
-from .utils.utils import DAScheduleResult, RTMPCResult
+from .utils.battery_model import BatteryParams
+from .utils.data_classes import DAScheduleResult, RTMPCResult
 
 
 def solve_rt_mpc(
