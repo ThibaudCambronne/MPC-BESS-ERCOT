@@ -1,23 +1,17 @@
 import pandas as pd
 import streamlit as st
 
+from app.utils_app.data import get_cached_ercot_data
 from src.forecasts.build_forecast_vs_actual_plotly_figure import (
     build_forecast_vs_actual_plotly_figure,
 )
 from src.forecasts.forecaster import get_forecast
 from src.globals import PRICE_NODE, TYPE_FORECASTS
-from src.utils.load_ercot_data import load_ercot_data
-
-
-@st.cache_data(show_spinner="Loading ERCOT data...")
-def _get_data() -> pd.DataFrame:
-    return load_ercot_data(verbose=False)
-
 
 st.title("Price Forecasts")
 st.caption("Forecast comparison across all methods")
 
-data = _get_data()
+data = get_cached_ercot_data()
 
 datetime_index = pd.DatetimeIndex(data.index)
 

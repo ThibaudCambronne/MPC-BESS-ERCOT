@@ -53,6 +53,13 @@ Start the multipage dashboard:
 uv run streamlit run app/main.py
 ```
 
+Screenshots of daily performance analysis page:
+![alt text](app/screenshots/daily_simulation_header_03312026.png)
+![alt text](app/screenshots/daily_simulation_graph_03312026.png)
+
+Screenshot of the app monthly performance analysis page:
+![alt text](app/screenshots/monthly_simulation_03312026.png)
+
 ### Custom Simulation
 
 ```python
@@ -96,6 +103,8 @@ for day in results.daily_results:
 ## Optimization Formulation
 
 ### Day Ahead
+
+This version of the formulation focuses only on the DA and RT energy markets. Ancillary services and other market products can be added in future iterations.
 
 #### Decision Variables
 

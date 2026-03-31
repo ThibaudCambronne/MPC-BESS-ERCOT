@@ -13,5 +13,7 @@ st.markdown(
     """
 ### Available Pages
 - **Price Forecasts**: Select a day and market (DA or RT), then compare different forecasts with actual prices.
+- **Daily Simulation**: Run day-ahead scheduling for a selected operating day and compare planned vs realized revenue.
+- **Monthly Simulation**: Iterate day-ahead scheduling over a selected month and review cumulative planned/realized/perfect revenues.
 """
 )
