@@ -138,13 +138,17 @@ This version of the formulation focuses only on the DA and RT energy markets. An
 #### Objective
 
 Minimize costs (maximize profits), which is costs from day-ahead and real-time markets:
-$$ \begin{align}
+
+```math
+\begin{align}
 \min_{\text{decision variables}} \quad & \sum_{t=0}^{T-1} \left( c_{da}(t) p_{da}(t) + c_{rt}(t) p_{rt}(t) \right) \Delta t
 
-\end{align} $$
+\end{align}
+```
 
 #### Constraints
-$$
+
+```math
 \begin{align}
 \text{Net Power flow:}
 && p_{real}(t) &= p_{da}(t) + p_{rt}(t)
@@ -181,9 +185,8 @@ $$
 \text{Battery cycling limit (prevents excessive cycling):}
 && \sum_{t=0}^{T-1} p_{ch}(t) \Delta t &\leq \delta_{cycle} (E_{\max} - E_{\min}) \\
 
-
 \end{align}
-$$
+```
 
 ## Architecture
 
