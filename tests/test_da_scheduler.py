@@ -42,7 +42,7 @@ def test_da_scheduler():
     )
 
     # --- CALCULATE PERFECT UNCERTAINTY FORECAST ---
-    # The magnitude of the error between the persistence forecast and the real price
+    # The magnitude of the error between the regression forecast and the real price
     # is used as a perfect proxy for the expected uncertainty (std dev).
     perfect_uncertainty_forecast = (rt_prices_real - rt_prices_forecast).abs()
 
@@ -74,55 +74,42 @@ def test_da_scheduler():
             "color": "tab:green",
             "linestyle": "-",
         },
-        # "Baseline (w=0, p=0, Unc=0)": {
-        #     "cvar_weight": 0,
-        #     "rt_uncertainty_default": 0,
-        #     "rt_dispatch_penalty": 0,
-        #     "rt_price_uncertainty": None,  # Use default/float
-        #     "forecast_input": (da_prices_forecast, rt_prices_forecast),
-        #     "color": "tab:blue",
-        #     "linestyle": "-",
-        # },
-        # "Risk-Averse Regression (w=0.5, Unc=20)": {
-        #     "cvar_weight": 0.5,
-        #     "rt_uncertainty_default": 20,
-        #     "rt_dispatch_penalty": 0,
-        #     "rt_price_uncertainty": None,  # Use default/float
-        #     "forecast_input": (da_prices_forecast, rt_prices_forecast),
-        #     "color": "tab:orange",
-        #     "linestyle": "--",
-        # },
-        # "Conservative Regression (w=0.1, Unc=20)": {
-        #     "cvar_weight": 0.1,
-        #     "rt_uncertainty_default": 20,
-        #     "rt_dispatch_penalty": 0,
-        #     "rt_price_uncertainty": None,  # Use default/float
-        #     "forecast_input": (da_prices_forecast, rt_prices_forecast),
-        #     "color": "tab:green",
-        #     "linestyle": ":",
-        # },
-        # "Perfect Uncertainty Regression (w=0.5)": {  # NEW SCENARIO
-        #     "cvar_weight": 0.1,
-        #     "rt_uncertainty_default": 0,
-        #     "rt_dispatch_penalty": 0,
-        #     "rt_price_uncertainty": perfect_uncertainty_forecast,  # <-- Use the Series
-        #     "forecast_input": (da_prices_forecast, rt_prices_forecast),
-        #     "color": "tab:purple",
-        #     "linestyle": "-.",
-        # },
-        # "Persistence (w=0.5)": {  # NEW SCENARIO
-        #     "cvar_weight": 0.1,
-        #     "rt_uncertainty_default": 0,
-        #     "rt_dispatch_penalty": 0,
-        #     "forecast_type": "persistence",
-        #     "rt_price_uncertainty": None,
-        #     "forecast_input": (
-        #         da_prices_forecast_persistence,
-        #         rt_prices_forecast_persistence,
-        #     ),
-        #     "color": "tab:red",
-        #     "linestyle": "-.",
-        # },
+        "Baseline Regression (w=0, p=0, Unc=0)": {
+            "cvar_weight": 0,
+            "rt_uncertainty_default": 0,
+            "rt_dispatch_penalty": 0,
+            "rt_price_uncertainty": None,  # Use default/float
+            "forecast_input": (da_prices_forecast, rt_prices_forecast),
+            "color": "tab:blue",
+            "linestyle": "-",
+        },
+        "Risk-Averse Regression (w=0.5, Unc=20)": {
+            "cvar_weight": 0.5,
+            "rt_uncertainty_default": 20,
+            "rt_dispatch_penalty": 0,
+            "rt_price_uncertainty": None,  # Use default/float
+            "forecast_input": (da_prices_forecast, rt_prices_forecast),
+            "color": "tab:orange",
+            "linestyle": "--",
+        },
+        "Conservative Regression (w=0.1, Unc=20)": {
+            "cvar_weight": 0.1,
+            "rt_uncertainty_default": 20,
+            "rt_dispatch_penalty": 0,
+            "rt_price_uncertainty": None,  # Use default/float
+            "forecast_input": (da_prices_forecast, rt_prices_forecast),
+            "color": "tab:green",
+            "linestyle": ":",
+        },
+        "Perfect Uncertainty Regression (w=0.5)": {
+            "cvar_weight": 0.1,
+            "rt_uncertainty_default": 0,
+            "rt_dispatch_penalty": 0,
+            "rt_price_uncertainty": perfect_uncertainty_forecast,  # <-- Use the Series
+            "forecast_input": (da_prices_forecast, rt_prices_forecast),
+            "color": "tab:purple",
+            "linestyle": "-.",
+        },
     }
 
     results_comparison = {}
@@ -149,7 +136,7 @@ def test_da_scheduler():
 
         # The 'real' revenue calculation MUST always use the REAL market prices,
         # regardless of what prices were used to generate the schedule.
-        revenue_real = (
+        revenue_real = -(
             result.da_energy_bids * da_prices_real
             + result.rt_energy_bids * rt_prices_real
         )
@@ -186,8 +173,9 @@ def test_da_scheduler():
             alpha=1 if "Perfect Prediction" in name else 0.8,
         )
 
+    date = current_time.strftime("%Y-%m-%d")
     ax.set_title(
-        "Cumulative Real Revenue: Optimization Scenarios vs. Perfect Information"
+        f"Cumulative Real Revenue ({date}): Optimization Scenarios vs. Perfect Information"
     )
     ax.set_ylabel("Cumulative Revenue (\$ / MWh)")
     ax.set_xlabel("Time")
@@ -195,11 +183,8 @@ def test_da_scheduler():
     ax.grid(True)
 
     plt.tight_layout()
-    plt.savefig(
-        "tests/da_scheduler_comparison_revenue_with_perfect_uncertainty.png", dpi=150
-    )
+    plt.savefig(f"tests/test_da_scheduler - {date}.png", dpi=150)
     plt.show()
-    plt.close()
 
     print("\nComparison of Total Real Revenue:")
     for name, data in results_comparison.items():
