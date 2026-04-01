@@ -1,6 +1,15 @@
 import pandas as pd
 import plotly.graph_objects as go
 
+from src.colors import (
+    DA_COLOR,
+    DEFAULT_FORECAST_COLOR,
+    FORECAST_METHOD_COLORS,
+    HISTORICAL_COLOR,
+    MISMATCH_FILL_RGBA,
+    RT_COLOR,
+)
+
 
 def _get_shared_forecast_index(forecasts: dict[str, pd.Series]) -> pd.DatetimeIndex:
     if not forecasts:
@@ -64,7 +73,9 @@ def _add_market_traces(
                 mode="lines",
                 name=forecast_name_template.format(method=method_name.capitalize()),
                 line={
-                    "color": forecast_colors.get(method_name.lower(), "#4e4949"),
+                    "color": forecast_colors.get(
+                        method_name.lower(), DEFAULT_FORECAST_COLOR
+                    ),
                     "width": 2,
                     "dash": "dash",
                 },
@@ -94,7 +105,7 @@ def _add_market_order_mismatch_rectangles(
             fig.add_vrect(
                 x0=active_start,
                 x1=ts,
-                fillcolor="rgba(220, 20, 60, 0.10)",
+                fillcolor=MISMATCH_FILL_RGBA,
                 line_width=0,
                 layer="below",
             )
@@ -104,7 +115,7 @@ def _add_market_order_mismatch_rectangles(
         fig.add_vrect(
             x0=active_start,
             x1=forecast_index.max() + step,
-            fillcolor="rgba(220, 20, 60, 0.10)",
+            fillcolor=MISMATCH_FILL_RGBA,
             line_width=0,
             layer="below",
         )
@@ -136,11 +147,8 @@ def build_forecast_vs_actual_plotly_figure(
 
     if rt_forecasts is None:
         color_map = {
-            "actual": "#1f77b4",
-            "persistence": "#ff7f0e",
-            "perfect": "#2ca02c",
-            "xgboost": "#d62728",
-            "regression": "#9467bd",
+            "actual": HISTORICAL_COLOR,
+            **FORECAST_METHOD_COLORS,
         }
 
         _add_market_traces(
@@ -152,11 +160,11 @@ def build_forecast_vs_actual_plotly_figure(
             historical_name=f"Historical ({historical_days}d)",
             actual_name="Actual",
             forecast_name_template="{method} Forecast",
-            historical_color="#000000",
+            historical_color=HISTORICAL_COLOR,
             actual_color=color_map["actual"],
             forecast_colors=color_map,
             historical_width=2,
-            historical_opacity=1.0,
+            historical_opacity=0.4,
         )
     else:
         if rt_price_col is None:
@@ -178,8 +186,8 @@ def build_forecast_vs_actual_plotly_figure(
         ]
 
         market_colors = {
-            "DA": "#1f77b4",
-            "RT": "#ff7f0e",
+            "DA": DA_COLOR,
+            "RT": RT_COLOR,
         }
 
         _add_market_traces(
@@ -240,7 +248,7 @@ def build_forecast_vs_actual_plotly_figure(
         xaxis={
             "range": [
                 current_time - pd.Timedelta(hours=visible_history_hours),
-                forecast_index.max(),
+                forecast_index.max() + pd.Timedelta(minutes=15),
             ]
         },
         # margin={"l": 10, "r": 10, "t": 60, "b": 10},

@@ -5,6 +5,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from app.utils_app.battery_controls import render_battery_params_expander
+from app.utils_app.cumulative_plot import add_cumulative_revenue_traces
 from app.utils_app.data import get_cached_ercot_data
 from app.utils_app.metrics import render_revenue_kpis
 from app.utils_app.selectors import (
@@ -13,8 +14,14 @@ from app.utils_app.selectors import (
     render_operating_day_selector,
 )
 from app.utils_app.simulation_math import (
+    compute_daily_tb_strategy_revenues,
     compute_revenue_series,
     solve_schedule_for_algorithm,
+)
+from src.colors import (
+    DA_COLOR,
+    RT_COLOR,
+    SOC_COLOR,
 )
 from src.forecasts.build_forecast_vs_actual_plotly_figure import (
     build_forecast_vs_actual_plotly_figure,
@@ -99,21 +106,17 @@ except Exception as exc:
     st.error(f"{selected_algorithm} Day-ahead scheduling failed: {exc}")
     st.stop()
 
-da_bids = schedule.da_energy_bids
-rt_bids = schedule.rt_energy_bids
-da_bids_perfect = schedule_perfect.da_energy_bids
-rt_bids_perfect = schedule_perfect.rt_energy_bids
 
 planned_step_revenue, realized_step_revenue, perfect_step_revenue = (
     compute_revenue_series(
         da_forecast=da_forecast,
         rt_forecast=rt_forecast,
-        da_bids=da_bids,
-        rt_bids=rt_bids,
+        da_bids=schedule.da_energy_bids,
+        rt_bids=schedule.rt_energy_bids,
         da_forecast_perfect=da_forecast_perfect,
         rt_forecast_perfect=rt_forecast_perfect,
-        da_bids_perfect=da_bids_perfect,
-        rt_bids_perfect=rt_bids_perfect,
+        da_bids_perfect=schedule_perfect.da_energy_bids,
+        rt_bids_perfect=schedule_perfect.rt_energy_bids,
     )
 )
 
@@ -121,14 +124,18 @@ planned_cumulative = np.cumsum(planned_step_revenue)
 realized_cumulative = np.cumsum(realized_step_revenue)
 perfect_cumulative = np.cumsum(perfect_step_revenue)
 
-planned_total = float(planned_cumulative[-1])
-realized_total = float(realized_cumulative[-1])
-perfect_total = float(perfect_cumulative[-1])
+tb_revenues = compute_daily_tb_strategy_revenues(
+    da_prices=da_forecast_perfect,
+    rt_prices=rt_forecast_perfect,
+    battery=battery,
+)
 
 render_revenue_kpis(
-    planned_total=planned_total,
-    realized_total=realized_total,
-    perfect_total=perfect_total,
+    planned_total=planned_cumulative[-1],
+    realized_total=realized_cumulative[-1],
+    perfect_total=perfect_cumulative[-1],
+    tb2_da_total=tb_revenues["tb2_da_revenue"],
+    tb4_da_total=tb_revenues["tb4_da_revenue"],
 )
 
 price_fig = build_forecast_vs_actual_plotly_figure(
@@ -158,49 +165,46 @@ fig = make_subplots(
     specs=[[{"secondary_y": False}], [{"secondary_y": True}], [{"secondary_y": False}]],
 )
 
-fig.add_trace(
-    go.Scatter(
-        x=operating_index,
-        y=planned_cumulative,
-        mode="lines",
-        name="Planned Cumulative",
-        line={"color": "#a74ea7", "width": 2, "dash": "dash"},
-        legendgroup="subplot1",
-    ),
+day_end_x = [operating_index[-1]]
+add_cumulative_revenue_traces(
+    fig=fig,
+    x_values=operating_index,
+    planned_cumulative=planned_cumulative,
+    realized_cumulative=realized_cumulative,
+    perfect_cumulative=perfect_cumulative,
     row=1,
     col=1,
-)
-fig.add_trace(
-    go.Scatter(
-        x=operating_index,
-        y=realized_cumulative,
-        mode="lines",
-        name="Realized Cumulative",
-        line={"color": "#a74ea7", "width": 2},
-        legendgroup="subplot1",
-    ),
-    row=1,
-    col=1,
-)
-fig.add_trace(
-    go.Scatter(
-        x=operating_index,
-        y=perfect_cumulative,
-        mode="lines",
-        name="Perfect Cumulative",
-        line={"color": "#59a14f", "width": 2},
-        legendgroup="subplot1",
-    ),
-    row=1,
-    col=1,
+    legendgroup="subplot1",
+    tb_marker_series=[
+        {
+            "x": day_end_x,
+            "y": [tb_revenues["tb2_da_revenue"]],
+            "name": "TB2 DA Revenue",
+        },
+        {
+            "x": day_end_x,
+            "y": [tb_revenues["tb2_rt_revenue"]],
+            "name": "TB2 RT Revenue",
+        },
+        {
+            "x": day_end_x,
+            "y": [tb_revenues["tb4_da_revenue"]],
+            "name": "TB4 DA Revenue",
+        },
+        {
+            "x": day_end_x,
+            "y": [tb_revenues["tb4_rt_revenue"]],
+            "name": "TB4 RT Revenue",
+        },
+    ],
 )
 
 fig.add_trace(
     go.Bar(
         x=operating_index,
-        y=np.round(da_bids, 1),
+        y=np.round(schedule.da_energy_bids, 1),
         name="DA Bid (MW)",
-        marker_color="#1f77b4",
+        marker_color=DA_COLOR,
         legendgroup="subplot2",
     ),
     row=2,
@@ -209,9 +213,9 @@ fig.add_trace(
 fig.add_trace(
     go.Bar(
         x=operating_index,
-        y=np.round(rt_bids, 1),
+        y=np.round(schedule.rt_energy_bids, 1),
         name="RT Bid (MW)",
-        marker_color="#ff7f0e",
+        marker_color=RT_COLOR,
         legendgroup="subplot2",
     ),
     row=2,
@@ -231,7 +235,7 @@ fig.add_trace(
         y=np.round(schedule.soc_schedule * 100, 0),
         mode="lines",
         name="Battery SOC",
-        line={"color": "black", "width": 2, "dash": "dot"},
+        line={"color": SOC_COLOR, "width": 2, "dash": "dot"},
         legendgroup="subplot2",
     ),
     row=2,

@@ -1,10 +1,10 @@
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
 from app.utils_app.battery_controls import render_battery_params_expander
+from app.utils_app.cumulative_plot import add_cumulative_revenue_traces
 from app.utils_app.data import get_cached_ercot_data
 from app.utils_app.metrics import render_revenue_kpis
 from app.utils_app.selectors import (
@@ -13,6 +13,7 @@ from app.utils_app.selectors import (
     render_month_selector,
 )
 from app.utils_app.simulation_math import (
+    compute_daily_tb_strategy_revenues,
     compute_revenue_series,
     solve_schedule_for_algorithm,
 )
@@ -49,6 +50,15 @@ month_n_steps = len(month_index)
 planned_step_revenue = np.zeros(month_n_steps)
 realized_step_revenue = np.zeros(month_n_steps)
 perfect_step_revenue = np.zeros(month_n_steps)
+
+da_price_col = f"{PRICE_NODE}_DAM"
+rt_price_col = f"{PRICE_NODE}_RTM"
+
+tb_day_end_timestamps: list[pd.Timestamp] = []
+tb2_da_daily_revenue: list[float] = []
+tb2_rt_daily_revenue: list[float] = []
+tb4_da_daily_revenue: list[float] = []
+tb4_rt_daily_revenue: list[float] = []
 
 month_da_forecast = np.full(month_n_steps, np.nan)
 month_rt_forecast = np.full(month_n_steps, np.nan)
@@ -127,6 +137,17 @@ for day_idx, operating_day_start in enumerate(operating_days):
         month_da_forecast[pos] = da_forecast.values
         month_rt_forecast[pos] = rt_forecast.values
 
+        day_tb_revenues = compute_daily_tb_strategy_revenues(
+            da_prices=da_forecast_perfect,
+            rt_prices=rt_forecast_perfect,
+            battery=battery,
+        )
+        tb_day_end_timestamps.append(day_index[-1])
+        tb2_da_daily_revenue.append(day_tb_revenues["tb2_da_revenue"])
+        tb2_rt_daily_revenue.append(day_tb_revenues["tb2_rt_revenue"])
+        tb4_da_daily_revenue.append(day_tb_revenues["tb4_da_revenue"])
+        tb4_rt_daily_revenue.append(day_tb_revenues["tb4_rt_revenue"])
+
     except Exception as exc:
         failed_days.append(f"{operating_day_start:%Y-%m-%d} ({exc})")
 
@@ -141,14 +162,17 @@ planned_cumulative = np.cumsum(planned_step_revenue)
 realized_cumulative = np.cumsum(realized_step_revenue)
 perfect_cumulative = np.cumsum(perfect_step_revenue)
 
-planned_total = float(planned_cumulative[-1]) if len(planned_cumulative) else 0.0
-realized_total = float(realized_cumulative[-1]) if len(realized_cumulative) else 0.0
-perfect_total = float(perfect_cumulative[-1]) if len(perfect_cumulative) else 0.0
+tb2_da_cumulative = np.cumsum(tb2_da_daily_revenue)
+tb2_rt_cumulative = np.cumsum(tb2_rt_daily_revenue)
+tb4_da_cumulative = np.cumsum(tb4_da_daily_revenue)
+tb4_rt_cumulative = np.cumsum(tb4_rt_daily_revenue)
 
 render_revenue_kpis(
-    planned_total=planned_total,
-    realized_total=realized_total,
-    perfect_total=perfect_total,
+    planned_total=planned_cumulative[-1],
+    realized_total=realized_cumulative[-1],
+    perfect_total=perfect_cumulative[-1],
+    tb2_da_total=tb2_da_cumulative[-1],
+    tb4_da_total=tb4_da_cumulative[-1],
 )
 
 if failed_days:
@@ -158,8 +182,6 @@ if failed_days:
         f"Failed days: {len(failed_days)}/{len(operating_days)}\n\n{preview}{suffix}"
     )
 
-da_price_col = f"{PRICE_NODE}_DAM"
-rt_price_col = f"{PRICE_NODE}_RTM"
 month_data = data.reindex(month_index)
 
 price_fig = build_forecast_vs_actual_plotly_figure(
@@ -187,41 +209,39 @@ fig = make_subplots(
     ),
 )
 
-fig.add_trace(
-    go.Scatter(
-        x=month_index,
-        y=planned_cumulative,
-        mode="lines",
-        name="Planned Cumulative",
-        line={"color": "#a74ea7", "width": 2, "dash": "dash"},
-        legendgroup="subplot1",
-    ),
+tb_marker_series = [
+    {
+        "x": tb_day_end_timestamps,
+        "y": tb2_da_cumulative,
+        "name": "TB2 DA Revenue",
+    },
+    {
+        "x": tb_day_end_timestamps,
+        "y": tb2_rt_cumulative,
+        "name": "TB2 RT Revenue",
+    },
+    {
+        "x": tb_day_end_timestamps,
+        "y": tb4_da_cumulative,
+        "name": "TB4 DA Revenue",
+    },
+    {
+        "x": tb_day_end_timestamps,
+        "y": tb4_rt_cumulative,
+        "name": "TB4 RT Revenue",
+    },
+]
+
+add_cumulative_revenue_traces(
+    fig=fig,
+    x_values=month_index,
+    planned_cumulative=planned_cumulative,
+    realized_cumulative=realized_cumulative,
+    perfect_cumulative=perfect_cumulative,
     row=1,
     col=1,
-)
-fig.add_trace(
-    go.Scatter(
-        x=month_index,
-        y=realized_cumulative,
-        mode="lines",
-        name="Realized Cumulative",
-        line={"color": "#a74ea7", "width": 2},
-        legendgroup="subplot1",
-    ),
-    row=1,
-    col=1,
-)
-fig.add_trace(
-    go.Scatter(
-        x=month_index,
-        y=perfect_cumulative,
-        mode="lines",
-        name="Perfect Cumulative",
-        line={"color": "#59a14f", "width": 2},
-        legendgroup="subplot1",
-    ),
-    row=1,
-    col=1,
+    legendgroup="subplot1",
+    tb_marker_series=tb_marker_series,
 )
 
 for trace in price_fig.data:
