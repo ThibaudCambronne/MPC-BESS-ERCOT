@@ -45,20 +45,24 @@ def render_revenue_kpis(
             "TB2 DA",
             f"${tb2_da_total:,.0f}",
             delta=f"{((tb2_da_total or 0) - realized_total) / abs(realized_total):.0%}",
+            delta_color="inverse",
         )
         kpi_tb4.metric(
             "TB4 DA",
             f"${tb4_da_total:,.0f}",
             delta=f"{((tb4_da_total or 0) - realized_total) / abs(realized_total):.0%}",
+            delta_color="inverse",
         )
 
     kpi2.metric(
         "Planned Revenue",
         f"${planned_total:,.0f}",
         delta=f"{(planned_total - realized_total) / abs(realized_total):.0%}",
+        delta_color="inverse",
     )
     kpi3.metric(
         "Perfect-Decision Revenue",
         f"${perfect_total:,.0f}",
         delta=f"{(perfect_total - realized_total) / abs(realized_total):.0%}",
+        delta_color="inverse",
     )
