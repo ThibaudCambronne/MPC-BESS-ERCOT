@@ -54,11 +54,11 @@ def solve_rt_mpc(
     da_index = pd.date_range(start=da_start, periods=n_da, freq=FREQUENCY)
     da_series = pd.Series(da_schedule.da_energy_bids, index=da_index)
 
-    # TODO: CHeck the fillna
+    # TODO: Potential issue:
     # The thing is that for receding horizon, we will eventually have time steps in
     # the following day, that aren't covered by the DA schedule.
     # We would need to get a new DA schedule for the next day.
-    da_commitments = da_series.reindex(horizon_index).fillna(0.0)
+    da_commitments = da_series.reindex(horizon_index).fillna(0)
 
     # ==================== Solve optimization ====================
     # TODO: Define the problem only once using cp.Parameters

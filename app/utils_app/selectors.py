@@ -5,8 +5,8 @@ import streamlit as st
 
 from src.globals import TYPE_FORECASTS
 
-ALGO_PYOMO = "Pyomo"
-ALGO_CVXPY = "CVXPY"
+ALGO_DA_ONLY = "DA Schedule Only"
+ALGO_DA_AND_RT_MPC = "DA Schedule + RT MPC Adjustments"
 
 
 def render_operating_day_selector(
@@ -60,7 +60,7 @@ def render_algorithm_selector(
     return str(
         st.selectbox(
             label,
-            options=[ALGO_PYOMO, ALGO_CVXPY],
+            options=[ALGO_DA_ONLY, ALGO_DA_AND_RT_MPC],
             index=default_index,
         )
     )

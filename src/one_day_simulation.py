@@ -4,6 +4,7 @@ import pandas as pd
 from src.forecasts.forecaster import get_forecast, get_forecasts_for_da
 from src.globals import (
     DELTA_T,
+    FREQUENCY,
     PRICE_NODE,
     TIME_STEPS_PER_HOUR,
     TYPE_FORECASTS,
@@ -82,16 +83,17 @@ def one_day_simulation(
         **da_schedule_kwargs,
     )
 
+    num_intervals = (
+        TIME_STEPS_PER_HOUR * daily_simulation_horizon_hours
+    )  # 96 intervals in 24 hours
+    da_plan_for_rt_energy_bids = da_schedule.rt_energy_bids[:num_intervals]
     if not use_rt_mpc:
-        rt_energy_bids = da_schedule.rt_energy_bids
+        rt_energy_bids = da_plan_for_rt_energy_bids
         rt_soc_schedule = da_schedule.soc_schedule
         rt_prices_used = rt_forecast.to_numpy()
 
     else:
         # === Stage 2: Real-Time MPC (run every 15 minutes) ===
-        num_intervals = (
-            TIME_STEPS_PER_HOUR * daily_simulation_horizon_hours
-        )  # 96 intervals in 24 hours
         rt_soc_schedule = np.zeros(num_intervals + 1)
         # Start from initial SOC from DA schedule
         rt_soc_schedule[0] = da_schedule.soc_schedule[0]
@@ -132,14 +134,24 @@ def one_day_simulation(
 
     # === Calculate Revenues ===
     da_energy_bids = da_schedule.da_energy_bids
-    da_revenue = -(da_energy_bids @ da_forecast.to_numpy() * DELTA_T)
+    da_forecast_used = da_forecast
+
+    da_revenue = -(da_energy_bids @ da_forecast_used.to_numpy() * DELTA_T)
     rt_revenue = -(rt_energy_bids @ rt_prices_used * DELTA_T)
     expected_revenue: float = da_revenue + rt_revenue  # type: ignore
+
+    rt_prices_used_index = pd.date_range(
+        start=operating_day_start, periods=num_intervals, freq=FREQUENCY
+    )
+    rt_prices_used_series = pd.Series(rt_prices_used, index=rt_prices_used_index)
 
     return DaySimulationResult(
         date=operating_day_start,
         da_energy_bids=da_energy_bids,
+        da_plan_for_rt_energy_bids=da_plan_for_rt_energy_bids,
         rt_energy_bids=rt_energy_bids,
+        da_forecast_used=da_forecast_used,
+        rt_forecast_used=rt_prices_used_series,
         soc_schedule=rt_soc_schedule,
         expected_revenue=expected_revenue,
     )
