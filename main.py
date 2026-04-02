@@ -78,7 +78,7 @@ def main():
 
         # Check if trajectory length matches market data (usually 96 intervals)
         # If soc_trajectory has 97 points (including start of next day), use [:96]
-        soc_values = day_result.soc_trajectory[: len(day_market_data)]
+        soc_values = day_result.soc_schedule[: len(day_market_data)]
 
         day_market_data["SOC"] = soc_values
 

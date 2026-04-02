@@ -97,6 +97,7 @@ def solve_schedule_for_algorithm(
             battery=battery,
             initial_soc=initial_soc,
             end_of_day_soc=end_of_day_soc,
+            n_scenarios=1,
         )
 
     if algorithm == ALGO_PYOMO:
@@ -106,6 +107,7 @@ def solve_schedule_for_algorithm(
             battery=battery,
             initial_soc=initial_soc,
             end_of_day_soc=end_of_day_soc,
+            n_scenarios=1,
         )
 
     raise ValueError(f"Unsupported algorithm: {algorithm}")

@@ -150,6 +150,7 @@ Minimize costs (maximize profits), which is costs from day-ahead and real-time m
 
 ```math
 \begin{align}
+
 \text{Net Power flow:}
 && p_{real}(t) &= p_{da}(t) + p_{rt}(t)
 && \forall t \in \{0, \ldots, T-1\} \\

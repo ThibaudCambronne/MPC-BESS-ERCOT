@@ -10,14 +10,17 @@ from src.globals import DELTA_T, TIME_STEPS_PER_HOUR
 from .utils.battery_model import BatteryParams
 from .utils.data_classes import DAScheduleResult
 
+DEFAULT_INITIAL_SOC = 0.5
+DEFAULT_END_OF_DAY_SOC = 0.5
+
 
 def solve_da_schedule(
     da_price_forecast: pd.Series,
     rt_price_forecast: pd.Series,
     battery: BatteryParams,
     rt_price_uncertainty: Optional[pd.Series] = None,
-    initial_soc: float = 0.5,
-    end_of_day_soc: float = 0.5,
+    initial_soc: float = DEFAULT_INITIAL_SOC,
+    end_of_day_soc: float = DEFAULT_END_OF_DAY_SOC,
     cvar_alpha: float = 0.90,
     cvar_weight: float = 0,
     rt_dispatch_penalty: float = 0,
@@ -365,27 +368,48 @@ def solve_da_schedule(
     )
 
 
-def solve_da_schedule_cvxpy(
-    da_price_forecast: pd.Series,
+def get_optimization_problem(
+    operating_day: pd.Timestamp,
     rt_price_forecast: pd.Series,
+    da_price_forecast: pd.Series,
     battery: BatteryParams,
-    rt_price_uncertainty: Optional[pd.Series] = None,
-    initial_soc: float = 0.5,
-    end_of_day_soc: float = 0.5,
-    cvar_alpha: float = 0.90,
-    cvar_weight: float = 0,
-    rt_dispatch_penalty: float = 0,
-    rt_uncertainty_default: float = 0,  # 20
-    n_scenarios: int = 20,
-    scenario_seed: Optional[int] = None,
-    verbose: bool = False,
-) -> DAScheduleResult:
+    initial_soc: float,
+    end_of_day_soc: float,
+    cvar_alpha: float,
+    cvar_weight: float,
+    rt_dispatch_penalty: float,
+    rt_price_uncertainty: Optional[pd.Series],
+    rt_uncertainty_default: float,
+    n_scenarios: int,
+    scenario_seed: Optional[int],
+    da_commitments: Optional[np.ndarray] = None,
+) -> tuple[cp.Problem, dict[str, cp.Variable]]:
 
     # Number of time periods
     T = len(rt_price_forecast)
 
+    assert rt_price_forecast.notna().all(), "RT price forecast contains NaN values"
+    assert da_price_forecast.notna().all(), "DA price forecast contains NaN values"
+
+    # Get the end of day index of the operating day
+    operating_day = operating_day.normalize()
+    end_of_day_timestamp = (
+        operating_day + pd.Timedelta(days=1) - pd.Timedelta(minutes=int(DELTA_T * 60))
+    )
+    end_of_day_index = rt_price_forecast.index.get_loc(end_of_day_timestamp)
+    assert isinstance(end_of_day_index, int), (
+        "End of day timestamp not found in RT price forecast index"
+    )
+
     # ==================== Variables ====================
-    p_da = cp.Variable(T, name="p_da")
+    if da_commitments is None:
+        p_da = cp.Variable(T, name="p_da")
+    else:
+        assert len(da_commitments) == T, (
+            "Length of da_commitments must match number of time periods"
+        )
+        p_da = cp.Parameter(T, name="p_da", value=da_commitments)
+
     p_rt = cp.Variable(T, name="p_rt")
     p_real = cp.Variable(T, name="p_real")
     p_discharge = cp.Variable(T, name="p_discharge")
@@ -405,16 +429,21 @@ def solve_da_schedule_cvxpy(
         (0 <= p_discharge).set_label("discharge_nonnegativity"),
         (p_charge <= battery.power_max_mw).set_label("charge_power_limit"),
         (p_discharge <= battery.power_max_mw).set_label("discharge_power_limit"),
-        (-battery.power_max_mw <= p_da).set_label("da_bid_lower_bound"),
-        (p_da <= battery.power_max_mw).set_label("da_bid_upper_bound"),
         (-battery.power_max_mw <= p_rt).set_label("rt_bid_lower_bound"),
         (p_rt <= battery.power_max_mw).set_label("rt_bid_upper_bound"),
     ]
+    if da_commitments is None:
+        constraints += [
+            (-battery.power_max_mw <= p_da).set_label("da_bid_lower_bound"),
+            (p_da <= battery.power_max_mw).set_label("da_bid_upper_bound"),
+        ]
 
     # Energy dynamics
     constraints += [
         (E[0] == initial_soc * battery.capacity_mwh).set_label("initial_energy"),
-        (E[T] == end_of_day_soc * battery.capacity_mwh).set_label("end_energy"),
+        (E[end_of_day_index + 1] == end_of_day_soc * battery.capacity_mwh).set_label(
+            "end_energy"
+        ),
         (
             E[1:]
             == E[:-1]
@@ -438,23 +467,68 @@ def solve_da_schedule_cvxpy(
     )
 
     # DA bid must be constant within each hour
-    for t in range(T):
-        hour = int(t / TIME_STEPS_PER_HOUR)
-        start_idx = int(hour * TIME_STEPS_PER_HOUR)
-        if t != start_idx:
-            constraints.append((p_da[t] == p_da[start_idx]).set_label(f"da_hourly_{t}"))
+    if da_commitments is None:
+        for t in range(T):
+            hour = int(t / TIME_STEPS_PER_HOUR)
+            start_idx = int(hour * TIME_STEPS_PER_HOUR)
+            if t != start_idx:
+                constraints.append(
+                    (p_da[t] == p_da[start_idx]).set_label(f"da_hourly_{t}")
+                )
 
     # ==================== Objective function ====================
     objective = cp.Minimize(
         (
-            cp.sum(da_price_forecast.values @ p_da)
+            (cp.sum(da_price_forecast.values @ p_da) if da_commitments is None else 0)
             + cp.sum(rt_price_forecast.values @ p_rt)
         )
         * DELTA_T
     )
 
-    # ==================== Solve ====================
-    problem = cp.Problem(objective, constraints)
+    variables = {
+        "p_rt": p_rt,
+        "p_real": p_real,
+        "p_discharge": p_discharge,
+        "p_charge": p_charge,
+        "E": E,
+    }
+    if isinstance(p_da, cp.Variable):
+        variables["p_da"] = p_da
+
+    return cp.Problem(objective, constraints), variables  # type: ignore
+
+
+def solve_da_schedule_cvxpy(
+    da_price_forecast: pd.Series,
+    rt_price_forecast: pd.Series,
+    battery: BatteryParams,
+    initial_soc: float = DEFAULT_INITIAL_SOC,
+    end_of_day_soc: float = DEFAULT_END_OF_DAY_SOC,
+    cvar_alpha: float = 0.90,
+    cvar_weight: float = 0,
+    rt_dispatch_penalty: float = 0,
+    rt_price_uncertainty: Optional[pd.Series] = None,
+    rt_uncertainty_default: float = 0,  # 20
+    n_scenarios: int = 20,
+    scenario_seed: Optional[int] = None,
+    verbose: bool = False,
+) -> DAScheduleResult:
+
+    problem, variables = get_optimization_problem(
+        operating_day=da_price_forecast.index[0].normalize(),
+        rt_price_forecast=rt_price_forecast,
+        da_price_forecast=da_price_forecast,
+        battery=battery,
+        initial_soc=initial_soc,
+        end_of_day_soc=end_of_day_soc,
+        cvar_alpha=cvar_alpha,
+        cvar_weight=cvar_weight,
+        rt_dispatch_penalty=rt_dispatch_penalty,
+        rt_price_uncertainty=rt_price_uncertainty,
+        rt_uncertainty_default=rt_uncertainty_default,
+        n_scenarios=n_scenarios,
+        scenario_seed=scenario_seed,
+    )
     problem.solve(verbose=verbose)
 
     if problem.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
@@ -464,26 +538,26 @@ def solve_da_schedule_cvxpy(
         print("Warning: Optimization solved to optimality but is inaccurate.")
 
     # ==================== Extract results ====================
-    da_revenue = -(da_price_forecast.values @ p_da.value * DELTA_T)
-    rt_revenue = -(rt_price_forecast.values @ p_rt.value * DELTA_T)
-    expected_revenue = da_revenue + rt_revenue
+    da_revenue = -(da_price_forecast.to_numpy() @ variables["p_da"].value * DELTA_T)
+    rt_revenue = -(rt_price_forecast.to_numpy() @ variables["p_rt"].value * DELTA_T)
+    expected_revenue: float = da_revenue + rt_revenue  # type: ignore
 
     return DAScheduleResult(
-        da_energy_bids=p_da.value,
-        rt_energy_bids=p_rt.value,
-        power_dispatch_schedule=p_real.value,
-        soc_schedule=E.value / battery.capacity_mwh,
+        da_energy_bids=variables["p_da"].value,
+        rt_energy_bids=variables["p_rt"].value,
+        power_dispatch_schedule=variables["p_real"].value,
+        soc_schedule=variables["E"].value / battery.capacity_mwh,
         reg_up_capacity=np.zeros_like(
-            p_da.value
+            variables["p_da"].value
         ),  # Placeholder, as we don't model regulation in this version
-        reg_down_capacity=np.zeros_like(p_da.value),
+        reg_down_capacity=np.zeros_like(variables["p_da"].value),
         expected_revenue=expected_revenue,
         diagnostic_information={
             "da_revenue": da_revenue,
             "rt_revenue": rt_revenue,
             "rt_penalty_cost": None,
-            "discharge": p_discharge.value,
-            "charge": p_charge.value,
+            "discharge": variables["p_discharge"].value,
+            "charge": variables["p_charge"].value,
             "var_threshold": None,
             "cvar_cost": None,
             "scenario_profits": None,

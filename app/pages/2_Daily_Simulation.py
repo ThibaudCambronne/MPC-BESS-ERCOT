@@ -138,19 +138,6 @@ render_revenue_kpis(
     tb4_da_total=tb_revenues["tb4_da_revenue"],
 )
 
-price_fig = build_forecast_vs_actual_plotly_figure(
-    current_time=operating_day_start,
-    data=data,
-    forecasts={selected_method: da_forecast},
-    market="DA/RT",
-    price_col=f"{PRICE_NODE}_DAM",
-    rt_forecasts={selected_method: rt_forecast},
-    rt_price_col=f"{PRICE_NODE}_RTM",
-    highlight_market_order_mismatch=True,
-    historical_days=2,
-    visible_history_hours=8,
-)
-
 fig = make_subplots(
     rows=3,
     cols=1,
@@ -164,6 +151,9 @@ fig = make_subplots(
     ),
     specs=[[{"secondary_y": False}], [{"secondary_y": True}], [{"secondary_y": False}]],
 )
+
+
+# 1st figure: Cumulative revenue comparison
 
 day_end_x = [operating_index[-1]]
 add_cumulative_revenue_traces(
@@ -198,6 +188,8 @@ add_cumulative_revenue_traces(
         },
     ],
 )
+
+# 2nd figure: DA/RT bids + SOC
 
 fig.add_trace(
     go.Bar(
@@ -243,6 +235,19 @@ fig.add_trace(
     secondary_y=True,
 )
 
+# 3rd figure: Prices
+price_fig = build_forecast_vs_actual_plotly_figure(
+    current_time=operating_day_start,
+    data=data,
+    forecasts={selected_method: da_forecast},
+    market="DA/RT",
+    price_col=f"{PRICE_NODE}_DAM",
+    rt_forecasts={selected_method: rt_forecast},
+    rt_price_col=f"{PRICE_NODE}_RTM",
+    highlight_market_order_mismatch=True,
+    historical_days=2,
+    visible_history_hours=8,
+)
 for trace in price_fig.data:
     trace.legendgroup = "subplot3"  # type: ignore
     fig.add_trace(trace, row=3, col=1)

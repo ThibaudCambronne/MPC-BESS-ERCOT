@@ -117,7 +117,7 @@ def run_simulation_for_date(data, date_str):
             current_time=curr_time,
             current_soc=curr_soc,
             rt_price_forecast=rt_prices_sim,
-            da_commitments=da_result,
+            da_schedule=da_result,
             battery=battery,
             horizon_type="receding",
             horizon_hours=mpc_horizon,

@@ -1,4 +1,3 @@
-import logging
 import os
 from typing import Literal, Optional
 
@@ -6,10 +5,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from src.one_day_simulation import one_day_simulation
+
 from .forecasts.forecaster import get_forecast, get_forecasts_for_da
-from .globals import DELTA_T, TIME_STEPS_PER_HOUR
+from .globals import DELTA_T
 from .stage1_da_scheduler import solve_da_schedule
-from .stage2_rt_mpc import solve_rt_mpc
 from .utils.battery_model import BatteryParams
 from .utils.data_classes import DAScheduleResult, DaySimulationResult, SimulationResult
 
@@ -29,10 +29,10 @@ def plot_day_simulation(
         # Create real timestamp axis (15-min intervals)
         day_start = day_result.date
         timestamps = pd.date_range(
-            start=day_start, periods=len(day_result.power_trajectory), freq="15min"
+            start=day_start, periods=len(day_result.power_schedule), freq="15min"
         )
         soc_timestamps = pd.date_range(
-            start=day_start, periods=len(day_result.soc_trajectory), freq="15min"
+            start=day_start, periods=len(day_result.soc_schedule), freq="15min"
         )
 
         fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(14, 18), sharex=True)
@@ -143,7 +143,7 @@ def plot_day_simulation(
         # Plot actual RT dispatch
         ax3.plot(
             timestamps,
-            day_result.power_trajectory,
+            day_result.power_schedule,
             "purple",
             linewidth=2,
             label="RT Actual (MPC dispatched)",
@@ -154,8 +154,8 @@ def plot_day_simulation(
         ax3.fill_between(
             timestamps,
             0,
-            day_result.power_trajectory,
-            where=(day_result.power_trajectory < 0),
+            day_result.power_schedule,
+            where=(day_result.power_schedule < 0),
             color="red",
             alpha=0.2,
             label="Actual Discharge",
@@ -163,8 +163,8 @@ def plot_day_simulation(
         ax3.fill_between(
             timestamps,
             0,
-            day_result.power_trajectory,
-            where=(day_result.power_trajectory > 0),
+            day_result.power_schedule,
+            where=(day_result.power_schedule > 0),
             color="blue",
             alpha=0.2,
             label="Actual Charge",
@@ -195,7 +195,7 @@ def plot_day_simulation(
         # Plot actual RT SOC
         ax4.plot(
             soc_timestamps,
-            day_result.soc_trajectory,
+            day_result.soc_schedule,
             "orange",
             linewidth=2,
             label="RT Actual",
@@ -223,176 +223,6 @@ def plot_day_simulation(
 
     except Exception as e:
         print(f"Day plotting error: {e}")
-
-
-def simulate_day(
-    data: pd.DataFrame,
-    date: pd.Timestamp,
-    initial_soc: float,
-    da_schedule: "DAScheduleResult",
-    battery: BatteryParams,
-    forecast_method: Literal["persistence", "perfect"],
-    horizon_type: Literal["shrinking", "receding"] = "receding",
-) -> DaySimulationResult:
-    """
-    NOTE: Running rt MPC with perfect forecast (assuming we improve forecasting accuracy in real time)
-
-    Simulate one complete day (24 hours) using pre-computed DA commitments.
-
-    The DA schedule should have been computed at 10:00 AM the previous day.
-    This function runs the RT MPC from 00:00 to 23:45 of the simulated day.
-
-    Power Sign Convention (CONSISTENT ACROSS ALL MODULES):
-    - Positive power = CHARGING (battery consuming power from grid)
-    - Negative power = DISCHARGING (battery supplying power to grid)
-
-    Revenue Convention:
-    - When charging (p > 0): We PAY the grid, so cost > 0, revenue < 0
-    - When discharging (p < 0): We RECEIVE from grid, so cost < 0, revenue > 0
-    - Revenue = sum(price * |discharge_power|) - sum(price * |charge_power|)
-
-    Parameters
-    ----------
-    data : pd.DataFrame
-        Historical price data
-    date : pd.Timestamp
-        The day to simulate (will normalize to midnight)
-    initial_soc : float
-        Starting SOC at 00:00 of this day
-    da_schedule : DAScheduleResult
-        Day-ahead commitments computed at 10 AM the previous day
-    battery : BatteryParams
-        Battery configuration
-    forecast_method : str
-        "perfect" or "persistence"
-    horizon_type : str
-        "receding" or "shrinking"
-
-    Returns DaySimulationResult.
-    """
-    # Normalize date to midnight
-    day_start = pd.Timestamp(date).normalize()
-    day_end = day_start + pd.Timedelta(days=1)
-
-    # Get actual prices for the day for revenue calculation
-    actual_rt_prices = get_forecast(
-        data=data,
-        current_time=day_start,
-        horizon_hours=24,
-        market="RT",
-        method="perfect",
-    )
-
-    actual_da_prices = get_forecast(
-        data=data,
-        current_time=day_start,
-        horizon_hours=24,
-        market="DA",
-        method="perfect",
-    )
-
-    # === Stage 2: Real-Time MPC (run every 15 minutes) ===
-    num_intervals = TIME_STEPS_PER_HOUR * 24  # 96 intervals in 24 hours
-    soc_trajectory = np.zeros(num_intervals + 1)
-    power_trajectory = np.zeros(num_intervals)  # Actual dispatched power
-    soc_trajectory[0] = initial_soc
-
-    for t in range(num_intervals):
-        current_time = day_start + pd.Timedelta(minutes=15 * t)
-        current_soc = soc_trajectory[t]
-
-        # Get RT price forecast from current time onwards
-        rt_price_forecast = get_forecast(
-            data=data,
-            current_time=current_time,
-            horizon_hours=24,
-            market="RT",
-            method=forecast_method,
-        )
-
-        # Solve RT MPC
-        # NOTE: giving acutal RT prices
-        rt_result = solve_rt_mpc(
-            current_time=current_time,
-            current_soc=current_soc,
-            rt_price_forecast=actual_rt_prices,
-            da_commitments=da_schedule,
-            battery=battery,
-            horizon_type=horizon_type,
-        )
-
-        # Apply power setpoint
-        # Convention: positive = charging, negative = discharging
-        power_setpoint = rt_result.power_setpoint
-        power_trajectory[t] = power_setpoint
-
-        # Update SOC based on actual power dispatch
-        # Positive power = charging (adding energy to battery)
-        # Negative power = discharging (removing energy from battery)
-        if power_setpoint > 0:  # Charging
-            energy_change_mwh = power_setpoint * battery.efficiency_charge * DELTA_T
-        else:  # Discharging (power_setpoint < 0)
-            # Energy removed from battery = |power_setpoint| / efficiency_discharge
-            energy_change_mwh = power_setpoint / battery.efficiency_discharge * DELTA_T
-
-        soc_next = current_soc + energy_change_mwh / battery.capacity_mwh
-
-        # Clamp SOC to valid range and log if clamping occurs
-        if not (battery.soc_min <= soc_next <= battery.soc_max):
-            logging.warning(
-                f"SOC out of bounds at {current_time}: {soc_next}, clamping to [{battery.soc_min}, {battery.soc_max}]"
-            )
-            soc_next = np.clip(soc_next, battery.soc_min, battery.soc_max)
-
-        soc_trajectory[t + 1] = soc_next
-
-    # === Calculate Revenues ===
-    # Revenue calculation based on actual market structure:
-    # 1. DA Market: Revenue from power bids placed in DA market at actual DA prices
-    # 2. RT Market: Revenue from difference between actual dispatch and DA bids at RT prices
-
-    # Get actual DA prices for the day
-    actual_rt_prices_arr = np.array(actual_rt_prices)
-    actual_da_prices_arr = np.array(actual_da_prices)
-
-    # Get DA power bids (what we committed to in DA market)
-    da_power_bids = da_schedule.da_energy_bids[: len(power_trajectory)]
-
-    # Calculate RT market imbalance: actual MPC dispatch - DA bids
-    rt_imbalance = power_trajectory - da_power_bids
-
-    # Calculate step-by-step revenues for detailed analysis
-    da_step_revenues = np.array(
-        [
-            -(actual_da_prices_arr[t] * da_power_bids[t] * DELTA_T)
-            for t in range(len(power_trajectory))
-        ]
-    )
-    rt_step_revenues = np.array(
-        [
-            -(actual_rt_prices_arr[t] * rt_imbalance[t] * DELTA_T)
-            for t in range(len(power_trajectory))
-        ]
-    )
-
-    # Calculate total revenues
-    da_revenue = float(np.sum(da_step_revenues))
-    rt_revenue = float(np.sum(rt_step_revenues))
-    total_revenue = da_revenue + rt_revenue
-
-    return DaySimulationResult(
-        date=day_start,
-        total_revenue=total_revenue,
-        da_revenue=da_revenue,
-        rt_revenue=rt_revenue,
-        soc_trajectory=soc_trajectory,
-        power_trajectory=power_trajectory,
-        final_soc=soc_trajectory[-1],
-        da_step_revenues=da_step_revenues,
-        rt_step_revenues=rt_step_revenues,
-        da_power_bids=da_power_bids,
-        rt_imbalance=rt_imbalance,
-    )
 
 
 def plot_multi_day_simulation(
@@ -427,7 +257,7 @@ def plot_multi_day_simulation(
             # Create timestamps for this day (15-min intervals)
             day_timestamps = pd.date_range(
                 start=day_result.date,
-                periods=len(day_result.power_trajectory),
+                periods=len(day_result.power_schedule),
                 freq="15min",
             )
 
@@ -612,11 +442,11 @@ def plot_multi_day_simulation(
         for day_result in results.daily_results:
             day_soc_timestamps = pd.date_range(
                 start=day_result.date,
-                periods=len(day_result.soc_trajectory),
+                periods=len(day_result.soc_schedule),
                 freq="15min",
             )
             all_soc_timestamps.extend(day_soc_timestamps)
-            all_soc_values.extend(day_result.soc_trajectory)
+            all_soc_values.extend(day_result.soc_schedule)
 
         ax4.plot(all_soc_timestamps, all_soc_values, "orange", linewidth=1.5)
         ax4.axhline(y=0.5, color="gray", linestyle=":", alpha=0.7, label="Target (50%)")
@@ -671,7 +501,7 @@ def plot_multi_day_simulation(
         daily_max_discharge = []
 
         for day_result in results.daily_results:
-            power = day_result.power_trajectory
+            power = day_result.power_schedule
             daily_avg_power.append(np.mean(power))
             daily_max_charge.append(
                 np.max(power[power > 0]) if np.any(power > 0) else 0
@@ -846,14 +676,14 @@ def run_simulation(
         da_schedule = da_schedules[sim_date]
 
         # Run RT MPC for the whole day
-        day_result = simulate_day(
+        day_result = one_day_simulation(
             data=data,
             date=sim_date,
             initial_soc=current_soc,
             da_schedule=da_schedule,
             battery=battery,
             forecast_method=forecast_method,
-            horizon_type=horizon_type,
+            rt_control_horizon_type=horizon_type,
         )
 
         # Store results

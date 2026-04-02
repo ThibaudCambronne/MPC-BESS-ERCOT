@@ -122,7 +122,7 @@ def run_simulation_comparison():
             current_time=current_time,
             current_soc=current_soc,
             rt_price_forecast=rt_prices_sim,
-            da_commitments=da_result,
+            da_schedule=da_result,
             battery=battery,
             horizon_type="receding",
             horizon_hours=mpc_horizon_hours,

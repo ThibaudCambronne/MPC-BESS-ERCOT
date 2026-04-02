@@ -8,7 +8,7 @@ RT_COLOR = "#ff7f0e"
 
 # Revenue and decision-series colors
 REVENUE_COLOR = "#a74ea7"
-PERFECT_REVENUE_COLOR = "#59a14f"
+PERFECT_REVENUE_COLOR = "#2ca02c"
 
 # Neutral/supporting colors
 HISTORICAL_COLOR = "#000000"
@@ -18,8 +18,8 @@ MISMATCH_FILL_RGBA = "rgba(220, 20, 60, 0.10)"
 
 # Forecast-method palette (single-market plots)
 FORECAST_METHOD_COLORS: dict[TYPE_FORECASTS, str] = {
-    "persistence": RT_COLOR,
-    "perfect": "#2ca02c",
+    "persistence": "#a0772c",
+    "perfect": PERFECT_REVENUE_COLOR,
     "xgboost": "#d62728",
-    "regression": "#9467bd",
+    "regression": "#7867bd",
 }
