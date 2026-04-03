@@ -53,12 +53,16 @@ def render_revenue_kpis(
             f"${tb2_da_total:,.0f}",
             delta=f"{((tb2_da_total or 0) - rt_stage_actual) / abs(rt_stage_actual):.0%}",
             delta_color="inverse",
+            help="Top-Bottom (TB2) of the actual DA market, multiplied by the battery power (limited by the battery duration). "
+            "More info about this metric: [Modoenergy](https://modoenergy.com/research/en/top-bottom-tb-price-spreads-revenue-benchmark-us-iso-explainer)",
         )
         kpi_tb4.metric(
             "TB4 DA",
             f"${tb4_da_total:,.0f}",
             delta=f"{((tb4_da_total or 0) - rt_stage_actual) / abs(rt_stage_actual):.0%}",
             delta_color="inverse",
+            help="Top-Bottom (TB4) of the actual DA market, multiplied by the battery power (limited by the battery duration). "
+            "More info about this metric: [Modoenergy](https://modoenergy.com/research/en/top-bottom-tb-price-spreads-revenue-benchmark-us-iso-explainer)",
         )
 
     kpi3.metric(
