@@ -39,7 +39,7 @@ The simulator requires three CSV files in the `data/` directory:
 
 ### Basic Usage
 
-Run the default 3-day simulation:
+Run a monthly simulation and create results plot:
 
 ```bash
 uv run main.py
@@ -50,61 +50,23 @@ uv run main.py
 Start the multipage dashboard:
 
 ```bash
-uv run streamlit run app/main.py
+uv run streamlit run app/Home.py
 ```
 
-Screenshots of daily performance analysis page:
-![alt text](app/screenshots/daily_simulation_header_03312026.png)
-![alt text](app/screenshots/daily_simulation_graph_03312026.png)
+Screenshot of daily performance analysis page:
+![alt text](app/screenshots/daily_sim_header_02042026.png)
 
-Screenshot of the app monthly performance analysis page:
-![alt text](app/screenshots/monthly_simulation_03312026.png)
-
-### Custom Simulation
-
-```python
-import pandas as pd
-from src.utils import load_ercot_data
-from src.battery_model import BatteryParams
-from src.simulator import run_simulation
-
-# Load data
-data = load_ercot_data()
-
-# Configure battery parameters (optional - uses defaults if not specified)
-battery = BatteryParams(
-    capacity_mwh=100.0,         # Energy capacity [MWh]
-    power_max_mw=25.0,          # Max charge/discharge [MW]
-    soc_min=0.1,                # Min state of charge [0-1]
-    soc_max=0.9,                # Max state of charge [0-1]
-    efficiency_charge=0.95,     # Charging efficiency
-    efficiency_discharge=0.95,  # Discharging efficiency
-    throughput_limit=200.0      # Daily throughput limit [MWh]
-)
-
-# Run simulation (simplified API)
-results = run_simulation(
-    data=data,
-    start_date=pd.Timestamp("2020-01-02"),
-    n_days=30,                  # Simulate 30 days
-    battery=battery,            # Optional
-    forecast_method="perfect",  # or "persistence"
-    horizon_type="receding",    # or "shrinking"
-    initial_soc=0.5,           # Start at 50% SOC
-    end_of_day_soc=0.5         # Target 50% at end of each day
-)
-
-# Access results
-print(f"Total Revenue: ${results.total_revenue:,.2f}")
-for day in results.daily_results:
-    print(f"{day.date.date()}: ${day.total_revenue:,.2f}")
-```
+Screenshots of the app monthly performance analysis page:
+![alt text](app/screenshots/monthly_sim_header_02042026.png)
+![alt text](app/screenshots/monthly_sim_revenue_02042026.png)
+![alt text](app/screenshots/monthly_sim_prices_02042026.png)
+![alt text](app/screenshots/monthly_sim_forecasts_accurracy_02042026.png)
 
 ## Optimization Formulation
 
-### Day Ahead
-
 This version of the formulation focuses only on the DA and RT energy markets. Ancillary services and other market products can be added in future iterations.
+
+### Day Ahead Stage
 
 #### Decision Variables
 
@@ -189,16 +151,30 @@ Minimize costs (maximize profits), which is costs from day-ahead and real-time m
 \end{align}
 ```
 
+### Real-Time Stage (MPC)
+
+The MPC stage solves the same optimization problem, except that the day ahead bids $p_{da}(t)$ are fixed to the values determined in the day-ahead stage. The optimization is solved at every time step $t$ with a receding horizon, using updated forecasts for prices and system states. Only the first output of each optimization is implemented, and the process repeats at the next time step.
+
+Even when using a persistence forecast, this controller allows improving the trading performance up to 10% compared to a static day-ahead schedule.
+
+## Forecasting Methods
+
+This project is not focused on forecasting, its goal is to improve the performance of the trading algorithms. Therefore, the main forecasting method studed is a simple persistence forecast, which assumes that future values will be the same as the most recent observed value. This is a common baseline in energy forecasting and provides a useful benchmark for evaluating the benefits of the MPC controller.
+
+That being said, we also provide very basic autoregressive forecasts using linear regression and XGBoost, which can be used to test the controller performance with more sophisticated forecasts. The forecasting module is designed to be modular, so that more advanced forecasting methods (e.g., LSTM, Transformer, Prophet, etc.) can be easily integrated in the future.
+
 ## Architecture
 
 ### Modules
 
-- [src/simulator.py](src/simulator.py) - Main simulation loop
-- [src/stage1_da_scheduler.py](src/stage1_da_scheduler.py) - Day-ahead optimization (CVXPY)
-- [src/stage2_rt_mpc.py](src/stage2_rt_mpc.py) - Real-time MPC (Pyomo/Ipopt)
-- [src/forecaster.py](src/forecaster.py) - Price forecasting (persistence/perfect)
-- [src/battery_model.py](src/battery_model.py) - Battery parameter configuration
-- [src/utils.py](src/utils.py) - Data loading and result structures
+- [main.py](main.py) - CLI entrypoint for month-level simulation and PNG export
+- [src/stage1_da_scheduler.py](src/stage1_da_scheduler.py) - Day-ahead stage optimization (CVXPY)
+- [src/stage2_rt_mpc.py](src/stage2_rt_mpc.py) - Real-time stage MPC optimizer (CVXPY)
+- [src/one_day_simulation.py](src/one_day_simulation.py) - Core two-stage daily simulation workflow
+- [src/multi_day_simulation.py](src/multi_day_simulation.py) - Day-range orchestration built from repeated one-day runs
+- [src/forecasts/forecaster.py](src/forecasts/forecaster.py) - Forecast generation (persistence, perfect, regression, xgboost)
+- [src/utils/] - Utility functions for data loading, performance metrics, etc.
+- [app/] - Streamlit app for interactive performance analysis
 
 ## License
 
