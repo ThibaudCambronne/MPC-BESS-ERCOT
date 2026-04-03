@@ -9,7 +9,7 @@ def render_battery_params_expander(
 ) -> BatteryParams:
     default_battery_params = default or BatteryParams()
 
-    with st.expander("⚙️ Battery Parameters", expanded=expanded):
+    with st.expander("Battery Parameters", expanded=expanded, icon=":material/menu:"):
         col1, col2, col3 = st.columns(3, gap="medium")
         with col1:
             capacity_mwh = st.number_input(

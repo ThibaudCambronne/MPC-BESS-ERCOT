@@ -80,34 +80,51 @@ def compute_daily_tb_strategy_revenues(
 
 def compute_revenue_series(
     da_forecast: pd.Series,
+    da_stage_rt_forecast_used: pd.Series,
     rt_forecast: pd.Series,
     da_bids: np.ndarray,
-    da_plan_for_rt_energy_bids: np.ndarray,
+    da_stage_rt_energy_bids: np.ndarray,
     rt_bids: np.ndarray,
     da_forecast_perfect: pd.Series,
     rt_forecast_perfect: pd.Series,
     da_bids_perfect: np.ndarray,
     rt_bids_perfect: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    planned_step_revenue = (
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    da_stage_planned_revenue = (
         -(
             da_forecast.to_numpy() * da_bids
-            + rt_forecast.to_numpy() * da_plan_for_rt_energy_bids
+            + da_stage_rt_forecast_used.to_numpy() * da_stage_rt_energy_bids
         )
         * DELTA_T
     )
-    realized_step_revenue = (
+    da_stage_actual_revenue = (
+        -(
+            da_forecast_perfect.to_numpy() * da_bids
+            + rt_forecast_perfect.to_numpy() * da_stage_rt_energy_bids
+        )
+        * DELTA_T
+    )
+    rt_stage_planned_revenue = (
+        -(da_forecast.to_numpy() * da_bids + rt_forecast.to_numpy() * rt_bids) * DELTA_T
+    )
+    rt_stage_actual_revenue = (
         -(
             da_forecast_perfect.to_numpy() * da_bids
             + rt_forecast_perfect.to_numpy() * rt_bids
         )
         * DELTA_T
     )
-    perfect_step_revenue = (
+    perfect_revenue = (
         -(
             da_forecast_perfect.to_numpy() * da_bids_perfect
             + rt_forecast_perfect.to_numpy() * rt_bids_perfect
         )
         * DELTA_T
     )
-    return planned_step_revenue, realized_step_revenue, perfect_step_revenue
+    return (
+        da_stage_planned_revenue,
+        da_stage_actual_revenue,
+        rt_stage_planned_revenue,
+        rt_stage_actual_revenue,
+        perfect_revenue,
+    )

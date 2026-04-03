@@ -2,8 +2,8 @@ import streamlit as st
 
 
 def render_revenue_kpis(
-    planned_total: float,
-    realized_total: float,
+    da_stage_actual: float,
+    rt_stage_actual: float,
     perfect_total: float,
     tb2_da_total: float | None = None,
     tb4_da_total: float | None = None,
@@ -13,13 +13,13 @@ def render_revenue_kpis(
     kpi_tb4 = None
 
     if show_tb:
-        kpi1, divider, kpi_tb2, kpi_tb4, kpi2, kpi3 = st.columns([1, 0.1, 1, 1, 1, 1])
+        kpi1, divider, kpi2, kpi_tb2, kpi_tb4, kpi3 = st.columns([1, 0.1, 1, 1, 1, 1])
     else:
         kpi1, divider, kpi2, kpi3 = st.columns([1, 0.1, 1, 1])
 
     kpi1.metric(
         "Realized Revenue",
-        f"${realized_total:,.0f}",
+        f"${rt_stage_actual:,.0f}",
     )
 
     with divider:
@@ -38,31 +38,32 @@ def render_revenue_kpis(
             unsafe_allow_html=True,
         )
 
+    kpi2.metric(
+        "DA Stage Only Revenue",
+        f"${da_stage_actual:,.0f}",
+        delta=f"{(da_stage_actual - rt_stage_actual) / abs(rt_stage_actual):.0%}",
+        delta_color="inverse",
+    )
+
     if show_tb:
         assert kpi_tb2 is not None
         assert kpi_tb4 is not None
         kpi_tb2.metric(
             "TB2 DA",
             f"${tb2_da_total:,.0f}",
-            delta=f"{((tb2_da_total or 0) - realized_total) / abs(realized_total):.0%}",
+            delta=f"{((tb2_da_total or 0) - rt_stage_actual) / abs(rt_stage_actual):.0%}",
             delta_color="inverse",
         )
         kpi_tb4.metric(
             "TB4 DA",
             f"${tb4_da_total:,.0f}",
-            delta=f"{((tb4_da_total or 0) - realized_total) / abs(realized_total):.0%}",
+            delta=f"{((tb4_da_total or 0) - rt_stage_actual) / abs(rt_stage_actual):.0%}",
             delta_color="inverse",
         )
 
-    kpi2.metric(
-        "Planned Revenue",
-        f"${planned_total:,.0f}",
-        delta=f"{(planned_total - realized_total) / abs(realized_total):.0%}",
-        delta_color="inverse",
-    )
     kpi3.metric(
         "Perfect-Decision Revenue",
         f"${perfect_total:,.0f}",
-        delta=f"{(perfect_total - realized_total) / abs(realized_total):.0%}",
+        delta=f"{(perfect_total - rt_stage_actual) / abs(rt_stage_actual):.0%}",
         delta_color="inverse",
     )

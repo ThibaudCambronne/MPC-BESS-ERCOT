@@ -71,11 +71,9 @@ def _add_market_traces(
                 x=list(forecast_aligned.index),
                 y=list(forecast_aligned.values),
                 mode="lines",
-                name=forecast_name_template.format(method=method_name.capitalize()),
+                name=forecast_name_template.format(method=method_name.title()),
                 line={
-                    "color": forecast_colors.get(
-                        method_name.lower(), DEFAULT_FORECAST_COLOR
-                    ),
+                    "color": forecast_colors.get(method_name, DEFAULT_FORECAST_COLOR),
                     "width": 2,
                     "dash": "dash",
                 },
@@ -129,6 +127,8 @@ def build_forecast_vs_actual_plotly_figure(
     price_col: str,
     rt_forecasts: dict[str, pd.Series] | None = None,
     rt_price_col: str | None = None,
+    forecast_colors: dict[str, str] | None = None,
+    rt_forecast_colors: dict[str, str] | None = None,
     highlight_market_order_mismatch: bool = False,
     historical_days: int = 5,
     visible_history_hours: int = 8,
@@ -146,10 +146,12 @@ def build_forecast_vs_actual_plotly_figure(
     ]
 
     if rt_forecasts is None:
-        color_map = {
-            "actual": HISTORICAL_COLOR,
-            **FORECAST_METHOD_COLORS,
+        default_forecast_colors: dict[str, str] = {
+            key: value for key, value in FORECAST_METHOD_COLORS.items()
         }
+        if forecast_colors is not None:
+            for key, value in forecast_colors.items():
+                default_forecast_colors[key] = value
 
         _add_market_traces(
             fig=fig,
@@ -161,8 +163,8 @@ def build_forecast_vs_actual_plotly_figure(
             actual_name="Actual",
             forecast_name_template="{method} Forecast",
             historical_color=HISTORICAL_COLOR,
-            actual_color=color_map["actual"],
-            forecast_colors=color_map,
+            actual_color=HISTORICAL_COLOR,
+            forecast_colors=default_forecast_colors,
             historical_width=2,
             historical_opacity=0.4,
         )
@@ -173,11 +175,6 @@ def build_forecast_vs_actual_plotly_figure(
         rt_forecast_index = _get_shared_forecast_index(rt_forecasts)
         if not rt_forecast_index.equals(forecast_index):
             raise ValueError("RT forecast index must match DA forecast index.")
-
-        if set(rt_forecasts.keys()) != set(forecasts.keys()):
-            raise ValueError(
-                "forecasts and rt_forecasts must use matching method keys."
-            )
 
         actual_rt = data.loc[forecast_index, rt_price_col]
         historical_rt = data.loc[
@@ -201,7 +198,11 @@ def build_forecast_vs_actual_plotly_figure(
             forecast_name_template="DA {method} Forecast",
             historical_color=market_colors["DA"],
             actual_color=market_colors["DA"],
-            forecast_colors={key: market_colors["DA"] for key in forecasts},
+            forecast_colors=(
+                forecast_colors
+                if forecast_colors is not None
+                else {key: market_colors["DA"] for key in forecasts}
+            ),
             historical_width=1,
             historical_opacity=0.4,
         )
@@ -217,18 +218,23 @@ def build_forecast_vs_actual_plotly_figure(
             forecast_name_template="RT {method} Forecast",
             historical_color=market_colors["RT"],
             actual_color=market_colors["RT"],
-            forecast_colors={key: market_colors["RT"] for key in rt_forecasts},
+            forecast_colors=(
+                rt_forecast_colors
+                if rt_forecast_colors is not None
+                else {key: market_colors["RT"] for key in rt_forecasts}
+            ),
             historical_width=1,
             historical_opacity=0.4,
         )
 
         if highlight_market_order_mismatch:
-            first_method = next(iter(forecasts.keys()))
+            first_da_method = next(iter(forecasts.keys()))
+            first_rt_method = next(iter(rt_forecasts.keys()))
             _add_market_order_mismatch_rectangles(
                 fig=fig,
                 forecast_index=forecast_index,
-                da_forecast=forecasts[first_method],
-                rt_forecast=rt_forecasts[first_method],
+                da_forecast=forecasts[first_da_method],
+                rt_forecast=rt_forecasts[first_rt_method],
                 actual_da=actual_da,
                 actual_rt=actual_rt,
             )

@@ -40,10 +40,12 @@ class DaySimulationResult:
 
     date: pd.Timestamp
     da_energy_bids: np.ndarray  # [MW]
-    da_plan_for_rt_energy_bids: np.ndarray  # [MW]
+    da_stage_rt_energy_bids: np.ndarray  # [MW]
     rt_energy_bids: np.ndarray  # [MW]
     da_forecast_used: pd.Series  # [$/MWh]
+    da_stage_rt_forecast_used: pd.Series  # [$/MWh] DA forecast used for RT pricing
     rt_forecast_used: pd.Series  # [$/MWh]
+    da_stage_soc_schedule: np.ndarray  # [0-1]
     soc_schedule: np.ndarray  # [0-1]
     expected_revenue: float  # [$]
 

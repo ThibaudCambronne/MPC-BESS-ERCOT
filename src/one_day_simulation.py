@@ -10,7 +10,7 @@ from src.globals import (
     TYPE_FORECASTS,
     TYPE_RT_HORIZON,
 )
-from src.stage1_da_scheduler import DEFAULT_END_OF_DAY_SOC, solve_da_schedule_cvxpy
+from src.stage1_da_scheduler import solve_da_schedule_cvxpy
 from src.stage2_rt_mpc import solve_rt_mpc
 from src.utils.battery_model import BatteryParams
 from src.utils.data_classes import DaySimulationResult
@@ -26,7 +26,8 @@ def one_day_simulation(
     rt_schedule_kwargs: dict = {},
     rt_control_horizon_type: TYPE_RT_HORIZON = "receding",
     rt_horizon_hours: int = 24,
-    forecast_method: TYPE_FORECASTS = "perfect",
+    da_stage_forecast_method: TYPE_FORECASTS = "perfect",
+    rt_stage_forecast_method: TYPE_FORECASTS = "perfect",
 ) -> DaySimulationResult:
     """
     Runs a simulation for a given day:
@@ -57,28 +58,30 @@ def one_day_simulation(
         The type of horizon for RT control.
     rt_horizon_hours : int
         The number of hours to include in the RT MPC horizon (default 24).
-    forecast_method : TYPE_FORECASTS
-        The method to use for generating forecasts.
+    da_stage_forecast_method : TYPE_FORECASTS
+        The method to generate all forecast in the DA stage.
+    rt_stage_forecast_method : TYPE_FORECASTS
+        The method to generate all forecast in the RT stage.
 
     """
     # Normalize date to midnight
     operating_day_start = pd.Timestamp(operating_day).normalize()
     schedule_time = operating_day_start - pd.Timedelta(days=1) + pd.Timedelta(hours=10)
 
-    # === Stage 1: DA Market ===
+    # ==================== Stage 1: DA Market ====================
     # forecasts and actual prices for the day
-    da_forecast, rt_forecast = get_forecasts_for_da(
+    da_forecast_used, da_stage_rt_forecast_used = get_forecasts_for_da(
         data=data,
         current_time=schedule_time,
         horizon_hours=daily_simulation_horizon_hours,
-        method=forecast_method,
+        method=da_stage_forecast_method,
         price_node=PRICE_NODE,
         verbose=False,
     )
 
     da_schedule = solve_da_schedule_cvxpy(
-        da_price_forecast=da_forecast,
-        rt_price_forecast=rt_forecast,
+        da_price_forecast=da_forecast_used,
+        rt_price_forecast=da_stage_rt_forecast_used,
         battery=battery,
         **da_schedule_kwargs,
     )
@@ -86,20 +89,28 @@ def one_day_simulation(
     num_intervals = (
         TIME_STEPS_PER_HOUR * daily_simulation_horizon_hours
     )  # 96 intervals in 24 hours
-    da_plan_for_rt_energy_bids = da_schedule.rt_energy_bids[:num_intervals]
+    da_stage_rt_energy_bids = da_schedule.rt_energy_bids
+
+    # ==================== Stage 2: Real-Time MPC (run every 15 minutes) ====================
     if not use_rt_mpc:
-        rt_energy_bids = da_plan_for_rt_energy_bids
+        rt_energy_bids = da_stage_rt_energy_bids
         rt_soc_schedule = da_schedule.soc_schedule
-        rt_prices_used = rt_forecast.to_numpy()
+        rt_forecast_used = da_stage_rt_forecast_used.to_numpy()
 
     else:
-        # === Stage 2: Real-Time MPC (run every 15 minutes) ===
+        if ("end_of_day_soc" not in da_schedule_kwargs) and (
+            "end_of_day_soc" not in rt_schedule_kwargs
+        ):
+            assert (
+                da_schedule_kwargs["end_of_day_soc"]
+                == rt_schedule_kwargs["end_of_day_soc"]
+            ), "End of day SOC must be the same in DA and RT schedule kwargs."
         rt_soc_schedule = np.zeros(num_intervals + 1)
         # Start from initial SOC from DA schedule
         rt_soc_schedule[0] = da_schedule.soc_schedule[0]
 
         rt_energy_bids = np.zeros(num_intervals)
-        rt_prices_used = np.zeros(num_intervals)
+        rt_forecast_used = np.zeros(num_intervals)
 
         for t in range(num_intervals):
             current_time = operating_day_start + pd.Timedelta(minutes=15 * t)
@@ -111,7 +122,7 @@ def one_day_simulation(
                 current_time=current_time,
                 horizon_hours=rt_horizon_hours,
                 market="RT",
-                method=forecast_method,
+                method=rt_stage_forecast_method,
             )
 
             # Solve RT MPC
@@ -122,36 +133,39 @@ def one_day_simulation(
                 da_schedule=da_schedule,
                 battery=battery,
                 horizon_type=rt_control_horizon_type,
-                end_of_day_soc=da_schedule_kwargs.get(
-                    "end_of_day_soc", DEFAULT_END_OF_DAY_SOC
-                ),
+                **rt_schedule_kwargs,
             )
 
             # Apply first power setpoint
             rt_energy_bids[t] = rt_schedule_t.rt_energy_bids[0]
             rt_soc_schedule[t + 1] = rt_schedule_t.soc_schedule[1]
-            rt_prices_used[t] = rt_forecast_t.iloc[0]
+            rt_forecast_used[t] = rt_forecast_t.iloc[0]
 
-    # === Calculate Revenues ===
+    # ==================== Calculate Revenues ====================
     da_energy_bids = da_schedule.da_energy_bids
-    da_forecast_used = da_forecast
 
     da_revenue = -(da_energy_bids @ da_forecast_used.to_numpy() * DELTA_T)
-    rt_revenue = -(rt_energy_bids @ rt_prices_used * DELTA_T)
+    rt_revenue = -(rt_energy_bids @ rt_forecast_used * DELTA_T)
     expected_revenue: float = da_revenue + rt_revenue  # type: ignore
 
     rt_prices_used_index = pd.date_range(
         start=operating_day_start, periods=num_intervals, freq=FREQUENCY
     )
-    rt_prices_used_series = pd.Series(rt_prices_used, index=rt_prices_used_index)
+    rt_prices_used_series = pd.Series(rt_forecast_used, index=rt_prices_used_index)
 
     return DaySimulationResult(
         date=operating_day_start,
+        # Energy bids
         da_energy_bids=da_energy_bids,
-        da_plan_for_rt_energy_bids=da_plan_for_rt_energy_bids,
+        da_stage_rt_energy_bids=da_stage_rt_energy_bids,
         rt_energy_bids=rt_energy_bids,
+        # Forecasts used
         da_forecast_used=da_forecast_used,
+        da_stage_rt_forecast_used=da_stage_rt_forecast_used,
         rt_forecast_used=rt_prices_used_series,
+        # SOC schedules
+        da_stage_soc_schedule=da_schedule.soc_schedule,
         soc_schedule=rt_soc_schedule,
+        # Revenue
         expected_revenue=expected_revenue,
     )

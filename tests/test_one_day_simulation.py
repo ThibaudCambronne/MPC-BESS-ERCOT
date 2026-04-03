@@ -16,5 +16,6 @@ def test_one_day_simulation():
         use_rt_mpc=True,
         rt_schedule_kwargs={},
         rt_control_horizon_type="receding",
-        forecast_method="persistence",
+        da_stage_forecast_method="persistence",
+        rt_stage_forecast_method="persistence",
     )
