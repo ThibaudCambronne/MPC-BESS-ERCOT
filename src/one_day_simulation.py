@@ -21,9 +21,9 @@ def one_day_simulation(
     operating_day: pd.Timestamp,
     battery: BatteryParams,
     daily_simulation_horizon_hours: int = 24,
-    da_schedule_kwargs: dict = {},
+    da_stage_kwargs: dict | None = None,
     use_rt_mpc: bool = False,
-    rt_schedule_kwargs: dict = {},
+    rt_stage_kwargs: dict | None = None,
     rt_control_horizon_type: TYPE_RT_HORIZON = "receding",
     rt_horizon_hours: int = 24,
     da_stage_forecast_method: TYPE_FORECASTS = "perfect",
@@ -47,12 +47,12 @@ def one_day_simulation(
         Parameters for the battery model.
     daily_simulation_horizon_hours : int
         Number of hours to simulate (default 24).
-    da_schedule_kwargs : dict
+    da_stage_kwargs : dict
         Parameters to pass to the DA scheduling function (e.g., src.stage1_da_scheduler.solve_da_schedule_cvxpy).
     use_rt_mpc : bool
         Whether to run the RT MPC stage.
         If False, only DA scheduling is performed and RT revenue is calculated based on DA schedule and actual RT prices.
-    rt_schedule_kwargs : dict
+    rt_stage_kwargs : dict | None
         Parameters to pass to the RT scheduling function (e.g., src.stage2_rt_mpc.solve_rt_mpc).
     rt_control_horizon_type : TYPE_HORIZON
         The type of horizon for RT control.
@@ -79,11 +79,14 @@ def one_day_simulation(
         verbose=False,
     )
 
+    da_stage_kwargs = dict(da_stage_kwargs or {})
+    rt_stage_kwargs = dict(rt_stage_kwargs or {})
+
     da_schedule = solve_da_schedule_cvxpy(
         da_price_forecast=da_forecast_used,
         rt_price_forecast=da_stage_rt_forecast_used,
         battery=battery,
-        **da_schedule_kwargs,
+        **da_stage_kwargs,
     )
 
     num_intervals = (
@@ -98,12 +101,11 @@ def one_day_simulation(
         rt_forecast_used = da_stage_rt_forecast_used.to_numpy()
 
     else:
-        if ("end_of_day_soc" not in da_schedule_kwargs) and (
-            "end_of_day_soc" not in rt_schedule_kwargs
+        if ("end_of_day_soc" in da_stage_kwargs) and (
+            "end_of_day_soc" in rt_stage_kwargs
         ):
             assert (
-                da_schedule_kwargs["end_of_day_soc"]
-                == rt_schedule_kwargs["end_of_day_soc"]
+                da_stage_kwargs["end_of_day_soc"] == rt_stage_kwargs["end_of_day_soc"]
             ), "End of day SOC must be the same in DA and RT schedule kwargs."
         rt_soc_schedule = np.zeros(num_intervals + 1)
         # Start from initial SOC from DA schedule
@@ -133,7 +135,7 @@ def one_day_simulation(
                 da_schedule=da_schedule,
                 battery=battery,
                 horizon_type=rt_control_horizon_type,
-                **rt_schedule_kwargs,
+                **rt_stage_kwargs,
             )
 
             # Apply first power setpoint

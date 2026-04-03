@@ -80,12 +80,12 @@ try:
         operating_day=operating_day_start,
         battery=battery,
         daily_simulation_horizon_hours=horizon_hours,
-        da_schedule_kwargs={
+        da_stage_kwargs={
             "initial_soc": da_initial_soc,
             "end_of_day_soc": da_end_of_day_soc,
         },
         use_rt_mpc=use_rt_mpc,
-        rt_schedule_kwargs={"end_of_day_soc": rt_end_of_day_soc},
+        rt_stage_kwargs={"end_of_day_soc": rt_end_of_day_soc},
         rt_control_horizon_type="receding",
         rt_horizon_hours=24,
         da_stage_forecast_method=da_forecast_method,
@@ -97,12 +97,12 @@ try:
         operating_day=operating_day_start,
         battery=battery,
         daily_simulation_horizon_hours=horizon_hours,
-        da_schedule_kwargs={
+        da_stage_kwargs={
             "initial_soc": da_initial_soc,
             "end_of_day_soc": da_end_of_day_soc,
         },
         use_rt_mpc=False,
-        rt_schedule_kwargs={},
+        rt_stage_kwargs={},
         rt_control_horizon_type="receding",
         rt_horizon_hours=24,
         da_stage_forecast_method="perfect",
