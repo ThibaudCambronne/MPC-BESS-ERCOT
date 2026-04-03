@@ -2,48 +2,20 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.globals import FREQUENCY, TIME_STEPS_PER_HOUR
+from src.globals import TIME_STEPS_PER_HOUR
 from src.multi_day_simulation import multi_day_simulation
 from src.utils.battery_model import BatteryParams
-from src.utils.data_classes import DaySimulationResult
-
-
-def _build_day_result(
-    operating_day: pd.Timestamp, base_value: float
-) -> DaySimulationResult:
-    n_steps = 24 * TIME_STEPS_PER_HOUR
-    index = pd.date_range(start=operating_day, periods=n_steps, freq=FREQUENCY)
-
-    da_energy = np.full(n_steps, base_value)
-    da_stage_rt_energy = np.full(n_steps, base_value + 1)
-    rt_energy = np.full(n_steps, base_value + 2)
-
-    da_prices = pd.Series(np.full(n_steps, 10.0 + base_value), index=index)
-    da_stage_rt_prices = pd.Series(np.full(n_steps, 20.0 + base_value), index=index)
-    rt_prices = pd.Series(np.full(n_steps, 30.0 + base_value), index=index)
-
-    return DaySimulationResult(
-        date=operating_day,
-        da_energy_bids=da_energy,
-        da_stage_rt_energy_bids=da_stage_rt_energy,
-        rt_energy_bids=rt_energy,
-        da_forecast_used=da_prices,
-        da_stage_rt_forecast_used=da_stage_rt_prices,
-        rt_forecast_used=rt_prices,
-        da_stage_soc_schedule=np.full(n_steps + 1, 0.5),
-        soc_schedule=np.full(n_steps + 1, 0.5),
-        expected_revenue=0.0,
-    )
+from tests.helpers import build_day_result
 
 
 def test_multi_day_simulation_aggregates_outputs(monkeypatch: pytest.MonkeyPatch):
     day1 = pd.Timestamp("2025-06-01")
     day2 = pd.Timestamp("2025-06-02")
 
-    selected_day1 = _build_day_result(day1, 1.0)
-    perfect_day1 = _build_day_result(day1, 101.0)
-    selected_day2 = _build_day_result(day2, 2.0)
-    perfect_day2 = _build_day_result(day2, 102.0)
+    selected_day1 = build_day_result(day1, 1.0)
+    perfect_day1 = build_day_result(day1, 101.0)
+    selected_day2 = build_day_result(day2, 2.0)
+    perfect_day2 = build_day_result(day2, 102.0)
 
     calls = [selected_day1, perfect_day1, selected_day2, perfect_day2]
 
@@ -81,8 +53,8 @@ def test_multi_day_simulation_fails_fast_on_day_error(monkeypatch: pytest.Monkey
     day1 = pd.Timestamp("2025-06-01")
     day2 = pd.Timestamp("2025-06-02")
 
-    selected_day1 = _build_day_result(day1, 1.0)
-    perfect_day1 = _build_day_result(day1, 101.0)
+    selected_day1 = build_day_result(day1, 1.0)
+    perfect_day1 = build_day_result(day1, 101.0)
 
     calls = [selected_day1, perfect_day1, RuntimeError("boom")]
 
