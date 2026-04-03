@@ -2,32 +2,36 @@ import pandas as pd
 import streamlit as st
 
 from app.utils_app.data import get_cached_ercot_data
+from app.utils_app.metrics import render_forecast_accuracy_markdown
+from app.utils_app.selectors import (
+    render_operating_day_selector,
+    render_price_node_selector,
+)
+from app.utils_app.simulation_math import compute_forecast_accuracy_metrics
 from src.forecasts.build_forecast_vs_actual_plotly_figure import (
     build_forecast_vs_actual_plotly_figure,
 )
 from src.forecasts.forecaster import get_forecast
-from src.globals import PRICE_NODE, TYPE_FORECASTS
+from src.globals import (
+    TYPE_FORECASTS,
+)
 
 st.title("Price Forecasts")
 st.caption("Forecast comparison across all methods")
 
-data = get_cached_ercot_data()
+col_price_node, col_date, col_market, col_horizon = st.columns(4)
+with col_price_node:
+    selected_price_node = render_price_node_selector()
+
+data = get_cached_ercot_data(selected_price_node)
+
 
 datetime_index = pd.DatetimeIndex(data.index)
-
-col_date, col_market, col_horizon = st.columns(3)
 with col_date:
-    available_dates = pd.Index(datetime_index.date).unique()
-    min_date = pd.Timestamp(available_dates.min()).date()
-    max_date = pd.Timestamp(available_dates.max()).date()
-
-    selected_date = st.date_input(
-        "Choose a date",
-        value=max_date,
-        min_value=min_date,
-        max_value=max_date,
+    current_time = render_operating_day_selector(
+        datetime_index,
+        label="Choose a date",
     )
-    current_time = pd.Timestamp(selected_date)
 
 with col_market:
     selected_market = st.selectbox("Choose a market", options=["DA", "RT"], index=0)
@@ -43,7 +47,7 @@ with col_horizon:
         )
     )
 
-price_col = f"{PRICE_NODE}_{selected_market}M"
+price_col = f"{selected_price_node}_{selected_market}M"
 
 methods: list[TYPE_FORECASTS] = [
     "persistence",
@@ -61,7 +65,7 @@ for method in methods:
             horizon_hours=horizon_hours,
             market=selected_market,  # type: ignore
             method=method,
-            price_node=PRICE_NODE,
+            price_node=selected_price_node,
             verbose=False,
         )
     except ValueError as exc:
@@ -92,6 +96,28 @@ st.plotly_chart(figure, width="stretch")
 forecast_end = first_forecast.index.max()
 
 st.write(
-    f"Using node: **{PRICE_NODE}**, methods: **{', '.join(forecasts.keys())}**, "
+    f"Using node: **{selected_price_node}**, methods: **{', '.join(forecasts.keys())}**, "
     f"horizon: **{horizon_hours}h**, window: **{current_time:%Y-%m-%d %H:%M} -> {forecast_end:%Y-%m-%d %H:%M}**"
 )
+
+forecast_accuracy_rows: list[tuple[str, str, str, dict[str, float]]] = []
+for method, forecast_series in forecasts.items():
+    actual_series = data.reindex(forecast_series.index)[price_col]
+    try:
+        metrics = compute_forecast_accuracy_metrics(
+            forecast=forecast_series,
+            actual=actual_series,
+        )
+    except ValueError:
+        continue
+    forecast_accuracy_rows.append(
+        (
+            selected_market,
+            "-",
+            method,
+            metrics,
+        )
+    )
+
+if forecast_accuracy_rows:
+    render_forecast_accuracy_markdown(forecast_accuracy_rows)

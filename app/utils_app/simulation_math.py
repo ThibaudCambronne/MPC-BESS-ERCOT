@@ -78,6 +78,40 @@ def compute_daily_tb_strategy_revenues(
     }
 
 
+def compute_forecast_accuracy_metrics(
+    forecast: pd.Series,
+    actual: pd.Series,
+    epsilon: float = 1e-6,
+) -> dict[str, float]:
+    aligned = pd.concat([forecast.rename("forecast"), actual.rename("actual")], axis=1)
+    aligned = aligned.dropna()
+    if aligned.empty:
+        raise ValueError("Cannot compute forecast accuracy on an empty overlap.")
+
+    error = aligned["forecast"] - aligned["actual"]
+    abs_error = np.abs(error)
+
+    mae = float(abs_error.mean())
+    rmse = float(np.sqrt(np.mean(np.square(error))))
+    bias = float(error.mean())
+
+    smape = float(
+        (
+            (2 * abs_error)
+            / (np.abs(aligned["forecast"]) + np.abs(aligned["actual"]) + epsilon)
+        ).mean()
+        * 100
+    )
+
+    return {
+        "n_points": float(len(aligned)),
+        "mae": mae,
+        "rmse": rmse,
+        "bias": bias,
+        "smape_pct": smape,
+    }
+
+
 def compute_revenue_series(
     da_forecast: pd.Series,
     da_stage_rt_forecast_used: pd.Series,

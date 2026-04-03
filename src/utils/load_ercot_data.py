@@ -7,18 +7,23 @@ from src.globals import (
     DATA_PATH_DAM_TRAINING,
     DATA_PATH_RTM,
     FREQUENCY,
+    POSSIBLE_PRICE_NODES,
     PRICE_NODE,
     WEATHER_FEATURES,
 )
 
 
-def load_ercot_data(verbose: bool = False) -> pd.DataFrame:
+def load_ercot_data(
+    price_node: str = PRICE_NODE, verbose: bool = False
+) -> pd.DataFrame:
     """
     Load ERCOT price and ancillary services data from a CSV file,
     including all WEATHER_FEATURES for the regression forecast method.
 
     Parameters
     ----------
+    price_node : str, optional
+        The price node for which to load data, by default PRICE_NODE
     verbose : bool, optional
         If True, displays information about missing data and interpolation, by default True
 
@@ -27,14 +32,17 @@ def load_ercot_data(verbose: bool = False) -> pd.DataFrame:
     pd.DataFrame
         DataFrame with datetime index and all columns from the CSV.
     """
+    assert price_node in POSSIBLE_PRICE_NODES, (
+        f"Price node {price_node} is not one of {POSSIBLE_PRICE_NODES}"
+    )
     # Define the core columns needed for both price and regression features
     DAM_COLUMNS = [
         "key",
-        f"{PRICE_NODE}_DAM",
+        f"{price_node}_DAM",
     ] + WEATHER_FEATURES
     RTM_COLUMNS = [
         "hour_timestamp",
-        PRICE_NODE,
+        price_node,
     ]  # No need to get the weather data again from RTM file
 
     # ====================
@@ -74,7 +82,7 @@ def load_ercot_data(verbose: bool = False) -> pd.DataFrame:
     df_rtm = pd.read_csv(DATA_PATH_RTM, usecols=RTM_COLUMNS)
 
     df_rtm = df_rtm.rename(
-        columns={PRICE_NODE: f"{PRICE_NODE}_RTM", "hour_timestamp": "key"}
+        columns={price_node: f"{price_node}_RTM", "hour_timestamp": "key"}
     )
 
     df_rtm["key"] = pd.to_datetime(df_rtm["key"])

@@ -67,3 +67,46 @@ def render_revenue_kpis(
         delta=f"{(perfect_total - rt_stage_actual) / abs(rt_stage_actual):.0%}",
         delta_color="inverse",
     )
+
+
+def render_forecast_accuracy_markdown(
+    metric_rows: list[tuple[str, str, str, dict[str, float]]],
+    title: str = "Forecast Accuracy",
+) -> None:
+    st.markdown(f"#### {title}")
+    st.markdown(
+        "Lower is better for MAE/RMSE/MAPE.",
+        help="**MAE**: Mean Absolute Error"
+        "\\\n **RMSE**: Root Mean Squared Error"
+        "\\\n**sMAPE**: Symmetric Mean Absolute Percentage Error. "
+        "A given error is more penalized when the actual value is small, and less penalized when the actual value is large."
+        "\\\n**Bias**: Average error. "
+        "Positive means over-forecasting, negative means under-forecasting.",
+    )
+    rows = [
+        "| Market Forecasted | Forecast Stage | Forecasting Method | MAE | RMSE | Bias | sMAPE | Samples |",
+        "|---|---|---|---:|---:|---:|---:|---:|",
+    ]
+
+    for market, stage, method, metrics in metric_rows:
+        rows.append(
+            "| "
+            + f"{market}"
+            + " | "
+            + f"{stage}"
+            + " | "
+            + f"{method}"
+            + " | "
+            + f"{metrics.get('mae', float('nan')):.2f}"
+            + " | "
+            + f"{metrics.get('rmse', float('nan')):.2f}"
+            + " | "
+            + f"{metrics.get('bias', float('nan')):.2f}"
+            + " | "
+            + f"{metrics.get('smape_pct', float('nan')):.2f}%"
+            + " | "
+            + f"{int(metrics.get('n_points', 0)):,}"
+            + " |"
+        )
+
+    st.markdown("\n".join(rows))

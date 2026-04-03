@@ -14,11 +14,29 @@ FREQUENCY = f"{60 // TIME_STEPS_PER_HOUR}min"
 
 MPC_BATTERY_EPSILON = 1e-6  # Battery capacity in MWh
 
-PRICE_NODE = "HB_SOUTH"  # Price node to use for forecasts and optimization
+
+TYPE_FORECASTS = Literal["persistence", "perfect", "xgboost", "regression"]
+TYPE_RT_HORIZON = Literal["shrinking", "receding"]
+
 WEATHER_FEATURES = [
     "dew_point_temperature_S",
     "temperature_S",
 ]
-
-TYPE_FORECASTS = Literal["persistence", "perfect", "xgboost", "regression"]
-TYPE_RT_HORIZON = Literal["shrinking", "receding"]
+PRICE_NODE = "HB_SOUTH"  # Price node to use for forecasts and optimization
+POSSIBLE_PRICE_NODES = [
+    "HB_SOUTH",
+    "HB_BUSAVG",
+    "HB_HOUSTON",
+    "HB_HUBAVG",
+    "HB_NORTH",
+    "HB_PAN",
+    "HB_WEST",
+    "LZ_AEN",
+    "LZ_CPS",
+    "LZ_HOUSTON",
+    "LZ_LCRA",
+    "LZ_NORTH",
+    "LZ_RAYBN",
+    "LZ_SOUTH",
+    "LZ_WEST",
+]

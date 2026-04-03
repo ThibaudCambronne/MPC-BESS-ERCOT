@@ -51,6 +51,24 @@ class DaySimulationResult:
 
 
 @dataclass
+class MultiDaySimulationResult:
+    """Aggregated outputs from running one-day simulations over multiple days."""
+
+    index: pd.DatetimeIndex
+    operating_days: pd.DatetimeIndex
+    da_energy_bids: np.ndarray  # [MW]
+    da_stage_rt_energy_bids: np.ndarray  # [MW]
+    rt_energy_bids: np.ndarray  # [MW]
+    da_forecast_used: pd.Series  # [$/MWh]
+    da_stage_rt_forecast_used: pd.Series  # [$/MWh]
+    rt_forecast_used: pd.Series  # [$/MWh]
+    da_energy_bids_perfect: np.ndarray  # [MW]
+    rt_energy_bids_perfect: np.ndarray  # [MW]
+    da_forecast_perfect: pd.Series  # [$/MWh]
+    rt_forecast_perfect: pd.Series  # [$/MWh]
+
+
+@dataclass
 class SimulationResult:
     """Results from multi-day simulation."""
 

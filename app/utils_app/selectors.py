@@ -3,7 +3,7 @@ from typing import cast
 import pandas as pd
 import streamlit as st
 
-from src.globals import TYPE_FORECASTS
+from src.globals import POSSIBLE_PRICE_NODES, PRICE_NODE, TYPE_FORECASTS
 
 ALGO_DA_ONLY = "DA Schedule Only"
 ALGO_DA_AND_RT_MPC = "DA Schedule + RT MPC Adjustments"
@@ -30,12 +30,31 @@ def render_operating_day_selector(
     return pd.Timestamp(selected_date)
 
 
+def render_price_node_selector(
+    label: str = "Choose a price node",
+    disabled: bool = False,
+) -> str:
+    default_index = (
+        POSSIBLE_PRICE_NODES.index(PRICE_NODE)
+        if PRICE_NODE in POSSIBLE_PRICE_NODES
+        else 0
+    )
+    return str(
+        st.selectbox(
+            label,
+            options=POSSIBLE_PRICE_NODES,
+            index=default_index,
+            disabled=disabled,
+        )
+    )
+
+
 def render_month_selector(
     datetime_index: pd.DatetimeIndex,
     label: str = "Choose month",
 ) -> tuple[pd.Timestamp, pd.Timestamp]:
     months = pd.PeriodIndex(datetime_index.to_period("M").unique()).sort_values()
-    selected_month = st.selectbox(label, options=months, index=len(months) - 1)
+    selected_month = st.selectbox(label, options=months, index=len(months) - 2)
 
     month_period = pd.Period(selected_month, freq="M")
     month_start = month_period.start_time
@@ -90,7 +109,7 @@ def render_rt_algorithm_selector():
     with rt_algo_col:
         selected_rt_algorithm = st.selectbox(
             "RT Stage Algorithm",
-            options=[RT_ALGO_NO_CONTROL, RT_ALGO_MPC],
+            options=[RT_ALGO_MPC, RT_ALGO_NO_CONTROL],
             index=0,
         )
     with rt_params_col:

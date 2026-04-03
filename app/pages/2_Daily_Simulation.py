@@ -9,16 +9,21 @@ from app.utils_app.cumulative_plot import (
     add_schedule_comparison_traces,
 )
 from app.utils_app.data import get_cached_ercot_data
-from app.utils_app.metrics import render_revenue_kpis
+from app.utils_app.metrics import (
+    render_forecast_accuracy_markdown,
+    render_revenue_kpis,
+)
 from app.utils_app.selectors import (
     RT_ALGO_MPC,
     RT_ALGO_NO_CONTROL,
     render_da_algorithm_selector,
     render_operating_day_selector,
+    render_price_node_selector,
     render_rt_algorithm_selector,
 )
 from app.utils_app.simulation_math import (
     compute_daily_tb_strategy_revenues,
+    compute_forecast_accuracy_metrics,
     compute_revenue_series,
 )
 from src.colors import (
@@ -33,7 +38,6 @@ from src.forecasts.build_forecast_vs_actual_plotly_figure import (
 )
 from src.globals import (
     FREQUENCY,
-    PRICE_NODE,
     TIME_STEPS_PER_HOUR,
 )
 from src.one_day_simulation import one_day_simulation
@@ -44,7 +48,14 @@ st.caption("Stage-1 day-ahead scheduling: planned vs realized revenue")
 data = get_cached_ercot_data()
 datetime_index = pd.DatetimeIndex(data.index)
 
-operating_day_start = render_operating_day_selector(datetime_index)
+
+col_price_node, col_day = st.columns(2)
+with col_price_node:
+    _selected_price_node = render_price_node_selector(
+        disabled=True,
+    )
+with col_day:
+    operating_day_start = render_operating_day_selector(datetime_index)
 
 
 selected_da_algorithm, da_forecast_method, da_initial_soc, da_end_of_day_soc = (
@@ -151,6 +162,7 @@ render_revenue_kpis(
     tb2_da_total=tb_revenues["tb2_da_revenue"],
     tb4_da_total=tb_revenues["tb4_da_revenue"],
 )
+
 
 # ==================== Graph Creation ====================
 
@@ -271,7 +283,7 @@ price_fig = build_forecast_vs_actual_plotly_figure(
     data=data,
     forecasts={da_forecast_method: schedule_final.da_forecast_used},
     market="DA/RT",
-    price_col=f"{PRICE_NODE}_DAM",
+    price_col=f"{_selected_price_node}_DAM",
     rt_forecasts={
         f"DA Stage {da_forecast_method}": schedule_final.da_stage_rt_forecast_used,
         f"RT Stage {rt_forecast_method}": schedule_final.rt_forecast_used,
@@ -280,7 +292,7 @@ price_fig = build_forecast_vs_actual_plotly_figure(
         f"DA Stage {da_forecast_method}": DA_STAGE_RT_FORECAST_COLOR,
         f"RT Stage {rt_forecast_method}": RT_COLOR,
     },
-    rt_price_col=f"{PRICE_NODE}_RTM",
+    rt_price_col=f"{_selected_price_node}_RTM",
     highlight_market_order_mismatch=True,
     historical_days=2,
     visible_history_hours=8,
@@ -322,7 +334,41 @@ fig.update_xaxes(title_text="Time", row=4, col=1)
 
 st.plotly_chart(fig, width="stretch")
 
+# ==================== Additional Information ====================
+
 schedule_time = operating_day_start - pd.Timedelta(days=1) + pd.Timedelta(hours=10)
 st.write(
-    f"Schedule run time: **{schedule_time:%Y-%m-%d %H:%M}**, operating day: **{operating_day_start:%Y-%m-%d}**, DA algorithm: **{selected_da_algorithm}**, RT algorithm: **{selected_rt_algorithm}**, DA model: **{da_forecast_method}**, RT model: **{rt_forecast_method}**"
+    f"Using node **{_selected_price_node}**, "
+    f"Schedule run time: **{schedule_time:%Y-%m-%d %H:%M}**, operating day: **{operating_day_start:%Y-%m-%d}**, "
+    f"DA algorithm: **{selected_da_algorithm}**, RT algorithm: **{selected_rt_algorithm}**"
 )
+forecast_accuracy_rows = [
+    (
+        "DA",
+        "DA Stage",
+        da_forecast_method,
+        compute_forecast_accuracy_metrics(
+            forecast=schedule_final.da_forecast_used,
+            actual=schedule_perfect.da_forecast_used,
+        ),
+    ),
+    (
+        "RT",
+        "DA Stage",
+        da_forecast_method,
+        compute_forecast_accuracy_metrics(
+            forecast=schedule_final.da_stage_rt_forecast_used,
+            actual=schedule_perfect.rt_forecast_used,
+        ),
+    ),
+    (
+        "RT",
+        "RT Stage",
+        rt_forecast_method,
+        compute_forecast_accuracy_metrics(
+            forecast=schedule_final.rt_forecast_used,
+            actual=schedule_perfect.rt_forecast_used,
+        ),
+    ),
+]
+render_forecast_accuracy_markdown(forecast_accuracy_rows)
