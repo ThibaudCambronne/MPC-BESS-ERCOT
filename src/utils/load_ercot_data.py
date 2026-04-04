@@ -3,10 +3,13 @@ import pandas as pd
 from matplotlib import pyplot as plt
 
 from src.globals import (
-    DATA_PATH_DAM_TESTING,
-    DATA_PATH_DAM_TRAINING,
-    DATA_PATH_RTM,
     FREQUENCY,
+    PATH_DAM_TESTING_DATA,
+    PATH_DAM_TESTING_DATA_SAMPLE,
+    PATH_DAM_TRAINING_DATA,
+    PATH_DAM_TRAINING_DATA_SAMPLE,
+    PATH_RTM_DATA,
+    PATH_RTM_DATA_SAMPLE,
     POSSIBLE_PRICE_NODES,
     PRICE_NODE,
     WEATHER_FEATURES,
@@ -48,14 +51,25 @@ def load_ercot_data(
     # ====================
     # Load DAM data
     # NOTE: Including WEATHER_FEATURES columns
+    training_data = (
+        PATH_DAM_TRAINING_DATA
+        if PATH_DAM_TRAINING_DATA.exists()
+        else PATH_DAM_TRAINING_DATA_SAMPLE
+    )
+    testing_data = (
+        PATH_DAM_TESTING_DATA
+        if PATH_DAM_TESTING_DATA.exists()
+        else PATH_DAM_TESTING_DATA_SAMPLE
+    )
+
     try:
-        df_dam_train = pd.read_csv(DATA_PATH_DAM_TRAINING, usecols=DAM_COLUMNS)
-        df_dam_test = pd.read_csv(DATA_PATH_DAM_TESTING, usecols=DAM_COLUMNS)
+        df_dam_train = pd.read_csv(training_data, usecols=DAM_COLUMNS)
+        df_dam_test = pd.read_csv(testing_data, usecols=DAM_COLUMNS)
     except ValueError as e:
         # Handle case where the new column might be missing from the files
         print(f"Error loading DAM data with required columns: {e}")
         print(
-            f"Ensure that all WEATHER_FEATURES are present in {DATA_PATH_DAM_TRAINING} and {DATA_PATH_DAM_TESTING}."
+            f"Ensure that all WEATHER_FEATURES are present in {training_data} and {testing_data}."
         )
         raise
 
@@ -72,14 +86,15 @@ def load_ercot_data(
     df_dam = (
         df_dam.drop_duplicates()
         .set_index("key")
-        .resample("15min")
+        .resample(FREQUENCY)
         .ffill(limit=4)
         .reset_index()
     )
 
     # ====================
     # Load RTM data
-    df_rtm = pd.read_csv(DATA_PATH_RTM, usecols=RTM_COLUMNS)
+    rtm_data = PATH_RTM_DATA if PATH_RTM_DATA.exists() else PATH_RTM_DATA_SAMPLE
+    df_rtm = pd.read_csv(rtm_data, usecols=RTM_COLUMNS)
 
     df_rtm = df_rtm.rename(
         columns={price_node: f"{price_node}_RTM", "hour_timestamp": "key"}

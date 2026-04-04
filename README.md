@@ -35,6 +35,8 @@ The simulator requires three CSV files in the `data/` directory:
 - `All_2025_with_AS.csv` - Day-ahead market testing data
 - `RTM_all_2020_2025_enriched.csv` - Real-time market data
 
+3-months sample files are provided for quick testing. Reach out to authors for access to the full datasets.
+
 ## Running Simulations
 
 ### Basic Usage

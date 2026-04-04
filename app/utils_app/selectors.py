@@ -19,11 +19,14 @@ def render_operating_day_selector(
 ) -> pd.Timestamp:
     available_dates = pd.Index(datetime_index.date).unique()
     min_date = pd.Timestamp(available_dates.min()).date()
+    second_to_last_date = pd.Timestamp(
+        available_dates.max() - pd.Timedelta(days=1)
+    ).date()
     max_date = pd.Timestamp(available_dates.max()).date()
 
     selected_date = st.date_input(
         label,
-        value=max_date,
+        value=second_to_last_date,
         min_value=min_date,
         max_value=max_date,
     )

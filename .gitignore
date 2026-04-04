@@ -1,5 +1,8 @@
 # Custom
 data/*.csv
+!data/All_2020_2024_with_AS_sample_3m.csv
+!data/All_2025_with_AS_sample_3m.csv
+!data/RTM_all_2020_2025_enriched_sample_3m.csv
 
 
 # Byte-compiled / optimized / DLL files
