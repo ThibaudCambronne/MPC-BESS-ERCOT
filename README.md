@@ -1,6 +1,7 @@
 # MPC-BESS-ERCOT
 
 A 2-stage MPC controller producing bidding strategy and battery control for Day-Ahead and Real-Time Energy and Ancillary Services ERCOT markets.
+Check out the [live app](https://thibaudcambronne-mpc-bess-ercot-apphome-iygoob.streamlit.app/)!
 
 ## Overview
 
@@ -49,7 +50,9 @@ uv run main.py
 
 ## Running The Streamlit App
 
-Start the multipage dashboard:
+You can access the app [here](https://thibaudcambronne-mpc-bess-ercot-apphome-iygoob.streamlit.app/).
+
+Start the multipage dashboard locally:
 
 ```bash
 uv run streamlit run app/Home.py
